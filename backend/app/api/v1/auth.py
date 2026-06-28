@@ -56,7 +56,7 @@ async def register(
         key="access_token",
         value=access_token,
         httponly=True,
-        secure=True,
+        secure=not settings.DEBUG,
         samesite="lax",
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/"
@@ -65,7 +65,7 @@ async def register(
         key="refresh_token",
         value=refresh_token,
         httponly=True,
-        secure=True,
+        secure=not settings.DEBUG,
         samesite="lax",
         max_age=7 * 24 * 3600,
         path="/"
@@ -147,7 +147,7 @@ async def login(
         key="access_token",
         value=access_token,
         httponly=True,
-        secure=True,
+        secure=not settings.DEBUG,
         samesite="lax",
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/"
@@ -156,7 +156,7 @@ async def login(
         key="refresh_token",
         value=refresh_token,
         httponly=True,
-        secure=True,
+        secure=not settings.DEBUG,
         samesite="lax",
         max_age=7 * 24 * 3600,
         path="/"
@@ -215,7 +215,7 @@ async def refresh(
         key="access_token",
         value=new_access,
         httponly=True,
-        secure=True,
+        secure=not settings.DEBUG,
         samesite="lax",
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/"
@@ -224,7 +224,7 @@ async def refresh(
         key="refresh_token",
         value=new_refresh,
         httponly=True,
-        secure=True,
+        secure=not settings.DEBUG,
         samesite="lax",
         max_age=7 * 24 * 3600,
         path="/"
