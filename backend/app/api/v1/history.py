@@ -1,0 +1,29 @@
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from typing import List
+from uuid import UUID
+from app.core.database import get_db
+from app.api.deps import get_current_user
+from app.models.models import User
+from app.repositories.repositories import QueryLogRepository
+from app.schemas.schemas import SQLExecuteResponse  # Reuse query schemas or define custom
+
+router = APIRouter()
+
+# Let's return structured query logs
+@router.get("/query-logs")
+async def get_query_logs(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    repo = QueryLogRepository(db)
+    logs = await repo.list_by_user(current_user.id)
+    return [
+        {
+            "id": log.id,
+            "query_text": log.query_text,
+            "status": log.status,
+            "execution_time_ms": log.execution_time_ms,
+            "created_at": log.created_at
+        } for log in logs
+    ]
