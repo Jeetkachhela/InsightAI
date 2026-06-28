@@ -132,7 +132,8 @@ export default function WorkspacePage() {
           credentials: "include"
         });
         if (!response.ok) {
-          throw new Error("Unauthorized session");
+          router.push("/");
+          return;
         }
         const user = await response.json();
         setEmail(user.email);
@@ -142,7 +143,7 @@ export default function WorkspacePage() {
         fetchDataSources(backendUrl);
         fetchQueryHistory(backendUrl);
       } catch (err) {
-        console.error("Session verification failed. Redirecting...", err);
+        console.warn("Session verification failed. Redirecting...", err);
         router.push("/");
       }
     };
