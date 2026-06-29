@@ -1,3 +1,4 @@
+import os
 import time
 import sqlite3
 from typing import List, Dict, Any, Optional
@@ -6,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import create_engine, text
 from app.models.models import DataSource, DatabaseConnection, SchemaMetadata, SchemaRelationship, QueryLog, AuditLog
 from app.repositories.repositories import DataSourceRepository, QueryLogRepository, AuditLogRepository
-from app.schemas.schemas import DataSourceCreate
+from app.schemas.schemas import DataSourceCreate, DatabaseConnectionCreate
 from app.core.security import encrypt_credential, decrypt_credential, is_safe_select_query, CredentialEncryptor
 from app.services.schema_discovery import SchemaDiscoveryService
 from app.services.rag import RAGService
@@ -97,6 +98,8 @@ class DataSourceService:
                 "database_name": ds.connection.database_name,
                 "schema_name": ds.connection.schema_name
             }
+            if session.in_transaction():
+                await session.commit()
             
             try:
                 async with session.begin():
@@ -148,6 +151,8 @@ class DataSourceService:
                 
             except Exception as e:
                 logger.error(f"Failed background schema discovery for datasource {ds_id}: {e}")
+                if session.in_transaction():
+                    await session.rollback()
                 try:
                     async with session.begin():
                         audit = AuditLog(
@@ -159,8 +164,59 @@ class DataSourceService:
                 except Exception as commit_err:
                     logger.error(f"Failed to log discovery failure to audit logs: {commit_err}")
 
+    async def seed_sample_sqlite(self, user_id: UUID) -> List[DataSource]:
+        db_file = os.path.abspath("sample_ecommerce.db")
+        if not os.path.exists(db_file):
+            conn = sqlite3.connect(db_file)
+            c = conn.cursor()
+            c.execute("CREATE TABLE IF NOT EXISTS customers (id INTEGER PRIMARY KEY, name TEXT, email TEXT, state TEXT, created_at TEXT)")
+            c.execute("CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY, name TEXT, category TEXT, price REAL, stock INTEGER)")
+            c.execute("CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY, customer_id INTEGER, product_id INTEGER, quantity INTEGER, total_price REAL, order_date TEXT)")
+            
+            c.executemany("INSERT INTO customers VALUES (?,?,?,?,?)", [
+                (1, 'Alice Smith', 'alice@example.com', 'SP', '2018-01-10'),
+                (2, 'Bob Jones', 'bob@example.com', 'RJ', '2019-03-15'),
+                (3, 'Carlos Silva', 'carlos@example.com', 'SP', '2020-05-20'),
+                (4, 'Diana Prince', 'diana@example.com', 'CA', '2021-07-22')
+            ])
+            c.executemany("INSERT INTO products VALUES (?,?,?,?,?)", [
+                (1, 'MacBook Pro 16', 'Electronics', 2499.99, 15),
+                (2, 'iPhone 15 Pro', 'Electronics', 999.99, 30),
+                (3, 'Sony WH-1000XM5', 'Accessories', 399.99, 50),
+                (4, 'Ergonomic Chair', 'Furniture', 499.99, 10)
+            ])
+            c.executemany("INSERT INTO orders VALUES (?,?,?,?,?,?)", [
+                (1, 1, 1, 1, 2499.99, '2019-05-14'),
+                (2, 3, 2, 2, 1999.98, '2020-11-20'),
+                (3, 2, 3, 1, 399.99, '2018-02-10'),
+                (4, 3, 4, 1, 499.99, '2021-08-05'),
+                (5, 1, 2, 1, 999.99, '2022-01-15')
+            ])
+            conn.commit()
+            conn.close()
+            
+        ds_in = DataSourceCreate(
+            name="Sample E-Commerce Store",
+            type="sqlite",
+            description="Sample e-commerce database with customers, products, and orders.",
+            connection_details=DatabaseConnectionCreate(
+                database_name=db_file,
+                schema_name="main"
+            )
+        )
+        try:
+            created_ds = await self.create_data_source_record(user_id, ds_in)
+            await self.discover_and_index_background(user_id, created_ds.id, None)
+            return [created_ds]
+        except Exception as e:
+            logger.error(f"Failed to auto-seed sample sqlite: {e}")
+            return []
+
     async def list_data_sources(self, user_id: UUID) -> List[DataSource]:
-        return await self.repo.list_by_user(user_id)
+        sources = await self.repo.list_by_user(user_id)
+        if not sources:
+            sources = await self.seed_sample_sqlite(user_id)
+        return sources
 
     async def get_data_source(self, ds_id: UUID, user_id: UUID) -> Optional[DataSource]:
         return await self.repo.get_by_id(ds_id, user_id)

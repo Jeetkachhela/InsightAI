@@ -236,7 +236,6 @@ async def refresh(
 async def logout(
     request: Request,
     response: Response,
-    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     refresh_token = request.cookies.get("refresh_token")
@@ -244,17 +243,9 @@ async def logout(
         auth_service = AuthService(db)
         await auth_service.logout_session(refresh_token)
         
-    # Clear cookies (SEC-005)
-    response.delete_cookie(key="access_token", path="/")
-    response.delete_cookie(key="refresh_token", path="/")
-    
-    # Audit log logout (ARCH-002)
-    audit_repo = AuditLogRepository(db)
-    await audit_repo.log(AuditLog(
-        user_id=current_user.id,
-        action="LOGOUT",
-        details=f"User logged out: {current_user.email}"
-    ))
+    # Clear cookies with exact matching attributes (SEC-005)
+    response.delete_cookie(key="access_token", path="/", secure=not settings.DEBUG, samesite="lax", httponly=True)
+    response.delete_cookie(key="refresh_token", path="/", secure=not settings.DEBUG, samesite="lax", httponly=True)
     return {"detail": "Logged out successfully"}
 
 @router.get("/sessions", response_model=List[UserSessionResponse])

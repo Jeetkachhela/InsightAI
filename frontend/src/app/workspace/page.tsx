@@ -543,6 +543,7 @@ export default function WorkspacePage() {
                       type="text"
                       value={nlQuery}
                       onChange={(e) => setNlQuery(e.target.value)}
+                      suppressHydrationWarning={true}
                       placeholder="e.g. Find all products purchased in the state of SP after 2018"
                       className="flex-1 rounded-md border border-zinc-900 bg-zinc-950/80 px-4 py-2.5 text-xs text-white placeholder-zinc-500 outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-all"
                     />

@@ -19,27 +19,6 @@ export default function AuthPage() {
     setApiHost(backendUrl);
   }, []);
 
-  // FE-010: Check session validity on mount (active verification)
-  useEffect(() => {
-    if (!apiHost) return;
-    
-    const checkSession = async () => {
-      try {
-        const res = await fetch(`${apiHost}/api/v1/auth/me`, {
-          method: "GET",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include" // Send HttpOnly cookie (SEC-005)
-        });
-        if (res.ok) {
-          router.push("/workspace");
-        }
-      } catch (err) {
-        // Unauthenticated session, let user log in
-      }
-    };
-    checkSession();
-  }, [apiHost, router]);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
@@ -96,7 +75,7 @@ export default function AuthPage() {
 
         {/* Card */}
         <div className="glass-card rounded-xl p-8 shadow-2xl">
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-6" suppressHydrationWarning={true}>
             <h2 className="text-xl font-semibold text-white">
               {isLogin ? "Welcome back" : "Create your account"}
             </h2>
@@ -119,6 +98,7 @@ export default function AuthPage() {
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
+                    suppressHydrationWarning={true}
                     className="w-full rounded-md border border-zinc-800 bg-zinc-950/80 py-2.5 pl-10 pr-4 text-sm text-white placeholder-zinc-500 outline-none transition-all focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
                     placeholder="name@example.com"
                   />
@@ -138,6 +118,7 @@ export default function AuthPage() {
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    suppressHydrationWarning={true}
                     className="w-full rounded-md border border-zinc-800 bg-zinc-950/80 py-2.5 pl-10 pr-4 text-sm text-white placeholder-zinc-500 outline-none transition-all focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
                     placeholder="••••••••"
                   />
