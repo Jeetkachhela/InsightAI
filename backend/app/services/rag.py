@@ -139,7 +139,7 @@ class RAGService:
                 logger.info(f"Removing obsolete schema embedding for: {key[1]}")
                 await db.delete(existing_emb)
                 
-        await db.flush()
+        await db.commit()
         logger.info("Successfully completed incremental schema embedding re-indexing.")
 
     async def retrieve_context(self, db: AsyncSession, data_source_id: UUID, query: str, top_k: int = 5) -> Dict[str, Any]:

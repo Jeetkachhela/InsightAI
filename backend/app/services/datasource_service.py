@@ -147,6 +147,8 @@ class DataSourceService:
                     
                 # Index schema runs separately because it has its own session/transaction handling
                 await self.rag_service.index_schema(session, ds_id)
+                if session.in_transaction():
+                    await session.commit()
                 logger.info(f"Background schema discovery completed successfully for {ds.name}.")
                 
             except Exception as e:
