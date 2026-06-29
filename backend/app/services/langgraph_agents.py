@@ -76,8 +76,13 @@ class LangGraphAgentsService:
         await self.db.flush()
         
         # 4. Token Budgeting & Context Trimming (AI-004)
-        # Fetch existing messages and limit history to the last 10 messages (5 turns)
-        all_msgs = sorted(conv.messages, key=lambda x: x.created_at)
+        # Fetch existing messages directly via async query to avoid lazy load IO error
+        res_msgs = await self.db.execute(
+            select(Message)
+            .where(Message.conversation_id == conversation_id)
+            .order_by(Message.created_at.asc())
+        )
+        all_msgs = list(res_msgs.scalars().all())
         trimmed_msgs = all_msgs[-10:] if len(all_msgs) > 10 else all_msgs
         
         conversation_history = [
