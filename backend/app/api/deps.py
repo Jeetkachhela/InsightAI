@@ -37,7 +37,8 @@ async def get_current_user(
             token, 
             settings.JWT_SECRET_KEY, 
             algorithms=[settings.JWT_ALGORITHM],
-            options={"require_aud": True, "require_iss": True}
+            audience="insightforge-app",
+            issuer="insightforge-auth"
         )
         if payload.get("iss") != "insightforge-auth" or payload.get("aud") != "insightforge-app":
             raise credentials_exception

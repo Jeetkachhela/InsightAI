@@ -29,3 +29,20 @@ def test_aes_credential_encryption():
     
     decrypted = decrypt_credential(encrypted)
     assert decrypted == secret_conn_str
+
+def test_jwt_decode_audience_validation():
+    from jose import jwt
+    from app.core.config import settings
+    data = {"sub": "test@user.com", "user_id": "8f51a2d1-d36d-4fbb-9a8c-b3bfef7b4e9f"}
+    token = create_access_token(data, expires_delta=timedelta(minutes=10))
+    
+    # Decoding with explicit audience and issuer (as done in deps.py) must succeed
+    payload = jwt.decode(
+        token,
+        settings.JWT_SECRET_KEY,
+        algorithms=[settings.JWT_ALGORITHM],
+        audience="insightforge-app",
+        issuer="insightforge-auth"
+    )
+    assert payload["aud"] == "insightforge-app"
+    assert payload["iss"] == "insightforge-auth"
