@@ -26,13 +26,16 @@ class RAGService:
                 raise
         return cls._model
 
-    def get_embedding(self, text: str) -> List[float]:
+import asyncio
+
+    async def get_embedding_async(self, text: str) -> List[float]:
         """
-        Generates a 384-dimensional vector embedding for the input text.
+        Generates a vector embedding without blocking the async event loop.
         """
-        model = self._get_model()
-        embedding = model.encode(text)
-        return embedding.tolist()
+        def _generate():
+            model = self._get_model()
+            return model.encode(text).tolist()
+        return await asyncio.to_thread(_generate)
 
     async def index_schema(self, db: AsyncSession, data_source_id: UUID) -> None:
         """
@@ -84,11 +87,11 @@ class RAGService:
                     logger.info(f"Embedding cache miss (modified description) for table: {table_name}")
                     existing_emb.description = table_desc
                     existing_emb.fingerprint = table_fingerprint
-                    existing_emb.embedding = self.get_embedding(table_desc)
+                    existing_emb.embedding = await self.get_embedding_async(table_desc)
                     db.add(existing_emb)
             else:
                 logger.info(f"Generating new embedding for table: {table_name}")
-                vector = self.get_embedding(table_desc)
+                vector = await self.get_embedding_async(table_desc)
                 emb_obj = SchemaEmbedding(
                     data_source_id=data_source_id,
                     entity_type="table",
@@ -119,10 +122,10 @@ class RAGService:
                         logger.info(f"Embedding cache miss for column: {col.table_name}.{col.column_name}")
                         existing_emb.description = col_desc
                         existing_emb.fingerprint = col_fingerprint
-                        existing_emb.embedding = self.get_embedding(col_desc)
+                        existing_emb.embedding = await self.get_embedding_async(col_desc)
                         db.add(existing_emb)
                 else:
-                    vector = self.get_embedding(col_desc)
+                    vector = await self.get_embedding_async(col_desc)
                     emb_obj = SchemaEmbedding(
                         data_source_id=data_source_id,
                         entity_type="column",
@@ -149,7 +152,7 @@ class RAGService:
         """
         logger.info(f"Retrieving schema context for query: '{query}'")
         
-        query_vector = self.get_embedding(query)
+        query_vector = await self.get_embedding_async(query)
         
         # Query pgvector for closest embeddings
         result = await db.execute(
