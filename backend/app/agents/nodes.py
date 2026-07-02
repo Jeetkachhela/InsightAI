@@ -17,7 +17,7 @@ def get_llm():
             model_name="llama-3.3-70b-versatile",
             temperature=0.0,
             timeout=15.0,
-            max_retries=1
+            max_retries=0
         )
     except Exception as e:
         logger.error(f"Failed to initialize ChatGroq: {e}. AI features will run in mock/fallback mode.")
