@@ -49,15 +49,12 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS configurations - Enforce strict origins, allow Vercel previews dynamically (SEC-004)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.FRONTEND_ORIGINS if settings.FRONTEND_ORIGINS else ["http://localhost:3000"],
-    allow_origin_regex=r"https://.*\.vercel\.app|http://localhost:\d+|https://.*\.onrender\.com",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+def add_cors_headers(request: Request, response: JSONResponse) -> JSONResponse:
+    origin = request.headers.get("origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
 
 # Global Database Exception Masking (SEC-009)
 @app.exception_handler(SQLAlchemyError)
@@ -67,14 +64,14 @@ async def database_exception_handler(request: Request, exc: SQLAlchemyError):
         f"Database operation failed during {request.method} {request.url.path}: {exc}",
         extra={"request_id": request_id}
     )
-    return JSONResponse(
+    return add_cors_headers(request, JSONResponse(
         status_code=500,
         content={
             "status": "error",
             "detail": "A database error occurred while processing your request.",
             "request_id": request_id
         }
-    )
+    ))
 
 # Global Unhandled Exception Masking (SEC-009)
 @app.exception_handler(Exception)
@@ -84,14 +81,14 @@ async def global_exception_handler(request: Request, exc: Exception):
         f"Unhandled system error during {request.method} {request.url.path}: {exc}",
         extra={"request_id": request_id}
     )
-    return JSONResponse(
+    return add_cors_headers(request, JSONResponse(
         status_code=500,
         content={
             "status": "error",
-            "detail": "An internal system error occurred. Please contact the administrator.",
+            "detail": f"An internal error occurred: {str(exc)}",
             "request_id": request_id
         }
-    )
+    ))
 
 # Request ID logging middleware
 @app.middleware("http")
@@ -106,6 +103,17 @@ async def add_request_id_and_log(request: Request, call_next):
     
     logger.info(f"Outgoing Response: {response.status_code}", extra=struct_extra)
     return response
+
+# CORS configurations - Enforce strict origins, allow Vercel previews dynamically (SEC-004)
+# Added after @app.middleware so it runs outermost in Starlette LIFO order
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.FRONTEND_ORIGINS if settings.FRONTEND_ORIGINS else ["http://localhost:3000"],
+    allow_origin_regex=r"https://.*\.vercel\.app|http://localhost:\d+|https://.*\.onrender\.com",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Register Router groups
 app.include_router(auth.router, prefix=f"{settings.API_V1_STR}/auth", tags=["auth"])

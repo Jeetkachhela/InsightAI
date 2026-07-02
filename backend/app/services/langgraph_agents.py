@@ -15,7 +15,7 @@ class LangGraphAgentsService:
         self.conv_repo = ConversationRepository(db)
         self.audit_repo = AuditLogRepository(db)
 
-    async def run_workflow(self, user_id: UUID, ds_id: UUID, user_query: str, conversation_id: Optional[UUID] = None) -> Dict[str, Any]:
+    async def run_workflow(self, user_id: UUID, ds_id: UUID, user_query: str, conversation_id: Optional[UUID] = None, force_classification: Optional[str] = None) -> Dict[str, Any]:
         """
         Orchestrates running user request through LangGraph, creating a conversation session, 
         storing messages with structured agent step results.
@@ -98,11 +98,17 @@ class LangGraphAgentsService:
         ]
         
         # 5. Construct initial LangGraph State
+        start_agent = "supervisor"
+        if force_classification == "sql_gen":
+            start_agent = "schema"
+        elif force_classification:
+            start_agent = force_classification.replace("sql_", "")
+
         initial_state = {
             "user_query": user_query,
             "data_source_id": str(ds_id),
-            "next_agent": "supervisor",
-            "classification": "",
+            "next_agent": start_agent,
+            "classification": force_classification or "",
             "schema_context": {},
             "query_plan": {},
             "generated_sql": "",

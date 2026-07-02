@@ -15,7 +15,9 @@ def get_llm():
         return ChatGroq(
             groq_api_key=settings.GROQ_API_KEY,
             model_name="llama-3.3-70b-versatile",
-            temperature=0.0
+            temperature=0.0,
+            timeout=15.0,
+            max_retries=1
         )
     except Exception as e:
         logger.error(f"Failed to initialize ChatGroq: {e}. AI features will run in mock/fallback mode.")
@@ -130,7 +132,7 @@ async def schema_node(state: AgentState) -> Dict[str, Any]:
             
     return {
         "schema_context": context,
-        "next_agent": "planner",
+        "next_agent": "sql",
         "messages": [{"role": "schema_agent", "content": f"Retrieved schema context containing tables: {list(context.get('tables', {}).keys())}"}]
     }
 
@@ -214,10 +216,11 @@ async def sql_node(state: AgentState) -> Dict[str, Any]:
         error_msg = "Insufficient schema context available. Additional information or schema retrieval is required."
         return {
             "generated_sql": "",
+            "sql_explanation": error_msg,
             "confidence_score": 0.0,
             "impact_analysis": {"error": "Missing schema"},
             "validation_result": {"is_safe": False, "error": error_msg},
-            "next_agent": "explain",
+            "next_agent": "end",
             "messages": [{"role": "sql_agent", "content": error_msg}]
         }
         
@@ -229,18 +232,18 @@ async def sql_node(state: AgentState) -> Dict[str, Any]:
         mock_sql = f"SELECT {col} FROM {table} LIMIT 10;"
         return {
             "generated_sql": mock_sql,
+            "sql_explanation": f"Generated query to fetch records from table `{table}` based on the retrieved schema.",
             "confidence_score": 0.5,
             "impact_analysis": {"tables_scanned": [table], "join_count": 0, "aggregation_complexity": "low"},
             "validation_result": {"is_safe": True, "reason": "Query is safe."},
-            "next_agent": "explain",
+            "next_agent": "end",
             "messages": [{"role": "sql_agent", "content": f"Generated SQL: {mock_sql}"}]
         }
 
     prompt = f"""You are the SQL Agent of InsightForge AI.
-Generate a PostgreSQL SELECT query to answer the user query based on the query plan and schema context.
+Generate a PostgreSQL SELECT query and clear Markdown explanation to answer the user query based on the schema context.
 
 Schema Context: {json.dumps(schema_context)}
-Query Plan: {json.dumps(query_plan)}
 User Query: "{user_query}"
 
 Mandatory Rules:
@@ -254,6 +257,7 @@ Mandatory Rules:
 Respond ONLY with a valid JSON block:
 {{
   "sql": "SELECT ...",
+  "explanation": "Clear Markdown explanation of what the SQL query does and the columns referenced.",
   "confidence_score": 0.95,
   "impact_analysis": {{
     "tables_scanned": ["table1"],
@@ -266,11 +270,13 @@ Respond ONLY with a valid JSON block:
         response = await llm.ainvoke(prompt)
         res_data = parse_json_response(response.content)
         sql = res_data.get("sql", "").strip()
+        explanation = res_data.get("explanation", "Query generated successfully based on database schema.")
         confidence = res_data.get("confidence_score", 0.0)
         impact = res_data.get("impact_analysis", {})
     except Exception as e:
         logger.error(f"SQL Agent LLM call failed: {e}")
         sql = "SELECT 'error' as status;"
+        explanation = f"Failed to generate SQL query: {str(e)}"
         confidence = 0.0
         impact = {"error": str(e)}
 
@@ -283,10 +289,11 @@ Respond ONLY with a valid JSON block:
 
     return {
         "generated_sql": sql,
+        "sql_explanation": explanation,
         "confidence_score": confidence,
         "impact_analysis": impact,
         "validation_result": validation,
-        "next_agent": "explain",
+        "next_agent": "end",
         "messages": [{"role": "sql_agent", "content": f"Generated query with confidence {confidence}"}]
     }
 

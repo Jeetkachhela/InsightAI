@@ -37,7 +37,8 @@ async def generate_sql(
                 user_id=current_user.id,
                 ds_id=req.data_source_id,
                 user_query=req.nl_query,
-                conversation_id=req.conversation_id
+                conversation_id=req.conversation_id,
+                force_classification="sql_gen"
             )
             return result
         except Exception as e:
