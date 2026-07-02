@@ -37,6 +37,8 @@ workflow.set_entry_point("supervisor")
 # Configure routing edges based on the next_agent state field
 workflow.add_conditional_edges("supervisor", route_next, {
     "schema": "schema",
+    "planner": "planner",
+    "sql": "sql",
     "explain": "explain",
     "optimize": "optimize",
     "debug": "debug",
@@ -45,6 +47,7 @@ workflow.add_conditional_edges("supervisor", route_next, {
 
 workflow.add_conditional_edges("schema", route_next, {
     "planner": "planner",
+    "sql": "sql",
     END: END
 })
 
