@@ -25,12 +25,13 @@ export default function ConnectDataSourcePage() {
     setError("");
     setLoading(true);
 
-    const apiHost = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const rawUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const apiHost = rawUrl.replace(/\/api\/v1\/?$/, "").replace(/\/$/, "");
 
     const payload = {
       name,
       type,
-      description: description || f"Connection for {name}",
+      description: description || `Connection for ${name}`,
       connection_details: {
         host: type === "sqlite" ? null : host,
         port: type === "sqlite" ? null : (port ? parseInt(port) : null),

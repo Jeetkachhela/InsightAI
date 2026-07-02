@@ -122,7 +122,8 @@ export default function WorkspacePage() {
 
   // FE-001 & FE-010: Active session validation on mount
   useEffect(() => {
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const rawUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const backendUrl = rawUrl.replace(/\/api\/v1\/?$/, "").replace(/\/$/, "");
     setApiHost(backendUrl);
     
     const checkSession = async () => {
@@ -200,6 +201,14 @@ export default function WorkspacePage() {
       console.error("Failed to load schema details", err);
     } finally {
       setLoadingSchema(false);
+    }
+  };
+
+  const handleSelectDataSource = (dsId: string) => {
+    const ds = dataSources.find((item) => item.id === dsId);
+    if (ds) {
+      setActiveDs(ds);
+      fetchSchema(ds.id, apiHost);
     }
   };
 
@@ -402,16 +411,35 @@ export default function WorkspacePage() {
         </div>
 
         {/* Middle Status Indicators */}
-        <div className="flex items-center gap-6">
-          {activeDs && (
-            <div className="flex items-center gap-2 px-3 py-1 rounded bg-zinc-900 border border-zinc-800 text-xs">
-              <Database size={12} className="text-violet-400" />
-              <span className="text-zinc-300 font-medium">Connected:</span>
-              <span className="text-zinc-500">{activeDs.name}</span>
-            </div>
-          )}
-
+        <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
+            <Database size={14} className="text-violet-400" />
+            <select
+              value={activeDs?.id || ""}
+              onChange={(e) => handleSelectDataSource(e.target.value)}
+              disabled={dataSources.length === 0}
+              className="bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-xs text-zinc-300 font-medium outline-none focus:border-violet-500 cursor-pointer"
+            >
+              {dataSources.map((ds) => (
+                <option key={ds.id} value={ds.id}>
+                  {ds.name} ({ds.type})
+                </option>
+              ))}
+              {dataSources.length === 0 && (
+                <option value="">No databases</option>
+              )}
+            </select>
+          </div>
+
+          <button
+            onClick={() => router.push("/workspace/connect")}
+            className="flex items-center gap-1.5 px-3 py-1 bg-violet-600 hover:bg-violet-500 border border-violet-500/30 rounded text-xs font-semibold text-white transition-all cursor-pointer shadow-sm"
+            title="Connect a new database or dataset"
+          >
+            <Plus size={13} /> Connect Database
+          </button>
+
+          <div className="flex items-center gap-2 ml-2 pl-4 border-l border-zinc-800">
             <span className="text-xs text-zinc-400">Teaching Mode</span>
             <button
               onClick={() => setTeachingMode(!teachingMode)}
@@ -446,6 +474,17 @@ export default function WorkspacePage() {
         
         {/* LEFT COLUMN: Explorer panels */}
         <div className="w-80 flex flex-col border-r border-border bg-zinc-950/20">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-zinc-950/60">
+            <span className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+              <Database size={13} className="text-violet-400" /> Data Sources
+            </span>
+            <button
+              onClick={() => router.push("/workspace/connect")}
+              className="flex items-center gap-1 px-2.5 py-1 bg-violet-600/20 hover:bg-violet-600/30 border border-violet-500/30 rounded text-[11px] font-semibold text-violet-300 hover:text-white transition-all cursor-pointer"
+            >
+              <Plus size={11} /> Connect
+            </button>
+          </div>
           <div className="flex border-b border-border bg-zinc-950/40">
             <button
               onClick={() => setActiveTabLeft("schema")}

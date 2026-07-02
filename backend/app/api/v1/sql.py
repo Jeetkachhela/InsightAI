@@ -90,8 +90,14 @@ async def execute_sql(
 )
 async def explain_sql_query(
     req: SQLActionRequest,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    service = DataSourceService(db)
+    ds = await service.get_data_source(req.data_source_id, current_user.id)
+    if not ds:
+        raise HTTPException(status_code=404, detail="DataSource not found or access denied.")
+        
     is_safe, reason = is_safe_select_query(req.sql)
     if not is_safe:
         raise HTTPException(
@@ -117,8 +123,14 @@ async def explain_sql_query(
 )
 async def optimize_sql_query(
     req: SQLActionRequest,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    service = DataSourceService(db)
+    ds = await service.get_data_source(req.data_source_id, current_user.id)
+    if not ds:
+        raise HTTPException(status_code=404, detail="DataSource not found or access denied.")
+        
     is_safe, reason = is_safe_select_query(req.sql)
     if not is_safe:
         raise HTTPException(
@@ -152,8 +164,14 @@ async def optimize_sql_query(
 )
 async def debug_sql_query(
     req: SQLActionRequest,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    service = DataSourceService(db)
+    ds = await service.get_data_source(req.data_source_id, current_user.id)
+    if not ds:
+        raise HTTPException(status_code=404, detail="DataSource not found or access denied.")
+        
     state = {
         "user_query": req.sql,
         "generated_sql": req.sql,

@@ -23,6 +23,13 @@ class LangGraphAgentsService:
         """
         logger.info(f"Starting LangGraph workflow for user {user_id} on datasource {ds_id}...")
         
+        # 0. Verify datasource ownership
+        from app.repositories.repositories import DataSourceRepository
+        ds_repo = DataSourceRepository(self.db)
+        ds = await ds_repo.get_by_id(ds_id, user_id)
+        if not ds:
+            raise ValueError("DataSource not found or access denied.")
+        
         # 1. Enforce User AI Daily Quota limits (AI-005)
         yesterday = datetime.utcnow() - timedelta(hours=24)
         

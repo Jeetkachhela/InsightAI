@@ -49,10 +49,11 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS configurations - Enforce strict origins, block wildcards (SEC-004)
+# CORS configurations - Enforce strict origins, allow Vercel previews dynamically (SEC-004)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.FRONTEND_ORIGINS,
+    allow_origins=settings.FRONTEND_ORIGINS if settings.FRONTEND_ORIGINS else ["http://localhost:3000"],
+    allow_origin_regex=r"https://.*\.vercel\.app|http://localhost:\d+|https://.*\.onrender\.com",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
