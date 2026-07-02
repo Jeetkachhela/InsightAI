@@ -31,7 +31,9 @@ export default function LandingAndAuthPage() {
     // If user is already logged in, check token/session
     const checkSession = async () => {
       try {
+        const token = localStorage.getItem("token");
         const res = await fetch(`${backendUrl}/api/v1/auth/me`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
           credentials: "include"
         });
         if (res.ok) {
@@ -76,7 +78,9 @@ export default function LandingAndAuthPage() {
         throw new Error(data.detail || "Authentication failed. Check your credentials.");
       }
 
-      localStorage.removeItem("token");
+      if (data.access_token) {
+        localStorage.setItem("token", data.access_token);
+      }
       localStorage.setItem("user_email", email);
       
       // Transition directly to main workspace page

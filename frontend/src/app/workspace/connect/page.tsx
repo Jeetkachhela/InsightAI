@@ -43,9 +43,13 @@ export default function ConnectDataSourcePage() {
     };
 
     try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
       const res = await fetch(`${apiHost}/api/v1/data-sources/`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
         credentials: "include",
         body: JSON.stringify(payload)
       });

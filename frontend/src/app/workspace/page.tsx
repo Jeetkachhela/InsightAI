@@ -98,8 +98,16 @@ export default function WorkspacePage() {
 
   // 2. Fetch Helper with Retry Strategy (FE-007)
   const fetchWithRetry = async (url: string, options: RequestInit = {}, retries = 3, backoff = 1000): Promise<Response> => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+    const mergedOptions: RequestInit = {
+      ...options,
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(options.headers || {})
+      }
+    };
     try {
-      const res = await fetch(url, options);
+      const res = await fetch(url, mergedOptions);
       if (!res.ok && (res.status >= 500 || res.status === 429) && retries > 0) {
         logger("Transient API warning. Retrying connection...");
         await new Promise(r => setTimeout(r, backoff));
@@ -128,7 +136,7 @@ export default function WorkspacePage() {
     
     const checkSession = async () => {
       try {
-        const response = await fetch(`${backendUrl}/api/v1/auth/me`, {
+        const response = await fetchWithRetry(`${backendUrl}/api/v1/auth/me`, {
           method: "GET",
           credentials: "include"
         });
@@ -237,7 +245,7 @@ export default function WorkspacePage() {
     setExecError("");
     
     try {
-      const response = await fetch(`${apiHost}/api/v1/sql/generate`, {
+      const response = await fetchWithRetry(`${apiHost}/api/v1/sql/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -276,7 +284,7 @@ export default function WorkspacePage() {
     setExecResult(null);
     
     try {
-      const response = await fetch(`${apiHost}/api/v1/sql/execute`, {
+      const response = await fetchWithRetry(`${apiHost}/api/v1/sql/execute`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -314,7 +322,7 @@ export default function WorkspacePage() {
     setLoadingSql(true);
     setOptReport(null);
     try {
-      const response = await fetch(`${apiHost}/api/v1/sql/optimize`, {
+      const response = await fetchWithRetry(`${apiHost}/api/v1/sql/optimize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -343,7 +351,7 @@ export default function WorkspacePage() {
     const debugPrompt = `SQL Query: ${sql}\nError reported: ${execError}`;
     
     try {
-      const response = await fetch(`${apiHost}/api/v1/sql/debug`, {
+      const response = await fetchWithRetry(`${apiHost}/api/v1/sql/debug`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -368,13 +376,14 @@ export default function WorkspacePage() {
   // Log out
   const handleLogout = async () => {
     try {
-      await fetch(`${apiHost}/api/v1/auth/logout`, {
+      await fetchWithRetry(`${apiHost}/api/v1/auth/logout`, {
         method: "POST",
         credentials: "include"
       });
     } catch (err) {
       // Ignore network errors on logout
     }
+    localStorage.removeItem("token");
     localStorage.removeItem("user_email");
     router.push("/");
   };
