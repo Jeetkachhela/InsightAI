@@ -263,7 +263,7 @@ export default function WorkspacePage() {
       
       setSql(data.generated_sql);
       setConfidence(data.confidence_score);
-      setImpact(data.impact);
+      setImpact(data.impact_analysis);
       setValidation(data.validation);
       setExplanation(data.explanation);
       setConversationId(data.conversation_id);

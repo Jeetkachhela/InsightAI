@@ -265,6 +265,48 @@ class LoginProtector:
 
 login_protector = LoginProtector()
 
+# Database connection attempt protector for SQL connections (SEC-006)
+class ConnectionAttemptProtector:
+    def __init__(self):
+        # Maps user_id -> {count, lock_until}
+        self.attempts: Dict[str, Dict[str, Any]] = {}
+        
+    def check_lock(self, user_id: str) -> None:
+        now = time.time()
+        key = str(user_id)
+        if key in self.attempts:
+            record = self.attempts[key]
+            if record["lock_until"] > now:
+                remaining_seconds = int(record["lock_until"] - now)
+                hours = remaining_seconds // 3600
+                minutes = (remaining_seconds % 3600) // 60
+                seconds = remaining_seconds % 60
+                time_str = f"{hours}h {minutes}m {seconds}s" if hours > 0 else (f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s")
+                raise ValueError(f"Too many failed database connection attempts. Locked out. Please try again in {time_str}.")
+                
+    def record_success(self, user_id: str) -> None:
+        key = str(user_id)
+        if key in self.attempts:
+            self.attempts.pop(key)
+            
+    def record_failure(self, user_id: str) -> int:
+        now = time.time()
+        key = str(user_id)
+        max_attempts = 3
+        lock_duration = 3 * 3600  # 3 hours
+        
+        if key not in self.attempts:
+            self.attempts[key] = {"count": 0, "lock_until": 0.0}
+        record = self.attempts[key]
+        record["count"] += 1
+        
+        if record["count"] >= max_attempts:
+            record["lock_until"] = now + lock_duration
+            
+        return max_attempts - record["count"]
+
+connection_protector = ConnectionAttemptProtector()
+
 # API Rate Limiter (SEC-007)
 class RateLimiter:
     def __init__(self):

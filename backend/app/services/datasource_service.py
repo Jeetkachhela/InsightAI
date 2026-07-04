@@ -26,10 +26,14 @@ class DataSourceService:
 
     async def create_data_source_record(self, user_id: UUID, ds_in: DataSourceCreate) -> DataSource:
         """
-        Saves the DataSource record immediately and flushes.
-        (Offloads discovery and indexing to background tasks).
+        Saves the DataSource record immediately and flushes after verifying the connection.
+        Enforces a 3-attempt database connection lockout mechanism.
         """
-        logger.info(f"Saving connection details for datasource '{ds_in.name}'...")
+        from app.core.security import connection_protector
+        # 1. Enforce connection lockout check
+        connection_protector.check_lock(user_id)
+
+        logger.info(f"Validating connection details for datasource '{ds_in.name}'...")
         
         # Check for duplicate connection details (Item 18)
         from sqlalchemy import select
@@ -49,6 +53,25 @@ class DataSourceService:
         encrypted_password = None
         if ds_in.connection_details.password:
             encrypted_password = self.encryptor.encrypt(ds_in.connection_details.password)
+
+        # 2. Test database connection details before saving
+        temp_conn_details = {
+            "host": ds_in.connection_details.host,
+            "port": ds_in.connection_details.port,
+            "username": ds_in.connection_details.username,
+            "password_encrypted": encrypted_password,
+            "database_name": ds_in.connection_details.database_name,
+            "schema_name": ds_in.connection_details.schema_name or "public"
+        }
+        
+        try:
+            # We run discover_schema to see if it succeeds.
+            # (Which tests connection, credentials, host, database exist, etc.)
+            await self.discovery_service.discover_schema(temp_conn_details, ds_in.type)
+            connection_protector.record_success(user_id)
+        except Exception as e:
+            remaining = connection_protector.record_failure(user_id)
+            raise ValueError(f"Database connection validation failed: {str(e)}. Remaining attempts: {remaining}")
             
         db_ds = DataSource(
             user_id=user_id,

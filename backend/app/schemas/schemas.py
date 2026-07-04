@@ -205,6 +205,7 @@ class SQLResponse(BaseModel):
     validation: Dict[str, Any]
     conversation_id: UUID
     message_id: UUID
+    explanation: str
 
 class SQLActionRequest(BaseModel):
     sql: str = Field(..., max_length=8000)
