@@ -33,15 +33,70 @@ class RAGService:
 
     async def get_embedding_async(self, text: str) -> List[float]:
         """
-        Generates a vector embedding without blocking the async event loop.
+        Generates a vector embedding.
+        If settings.USE_LOCAL_EMBEDDINGS is True, tries generating locally (using PyTorch).
+        Otherwise, fetches the embedding from Hugging Face Inference API to avoid memory overhead.
         """
-        if not settings.USE_LOCAL_EMBEDDINGS:
-            raise RuntimeError("Local embeddings are disabled by configuration settings.")
+        if settings.USE_LOCAL_EMBEDDINGS:
+            try:
+                def _generate():
+                    model = self._get_model()
+                    return model.encode(text).tolist()
+                return await asyncio.to_thread(_generate)
+            except Exception as e:
+                logger.warning(f"Local embedding generation failed: {e}. Trying Hugging Face API.")
+
+        # Hugging Face Inference API Path
+        # Looks for HF_TOKEN, HF_API_KEY, or HUGGINGFACE_API_KEY
+        import os
+        import httpx
+        
+        hf_token = os.getenv("HF_TOKEN") or os.getenv("HF_API_KEY") or os.getenv("HUGGINGFACE_API_KEY")
+        model_id = "sentence-transformers/all-MiniLM-L6-v2"
+        api_url = f"https://api-inference.huggingface.co/models/{model_id}"
+        
+        headers = {}
+        if hf_token:
+            headers["Authorization"] = f"Bearer {hf_token}"
             
-        def _generate():
-            model = self._get_model()
-            return model.encode(text).tolist()
-        return await asyncio.to_thread(_generate)
+        def flatten_to_float_list(data) -> List[float]:
+            if not isinstance(data, list):
+                raise ValueError(f"Expected list from HF API, got {type(data)}")
+            if not data:
+                raise ValueError("Empty list received from HF API")
+            if isinstance(data[0], list):
+                return flatten_to_float_list(data[0])
+            return [float(x) for x in data]
+
+        logger.info(f"Generating embedding via HF Inference API for: '{text[:40]}...'")
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            for attempt in range(3):
+                try:
+                    response = await client.post(
+                        api_url,
+                        headers=headers,
+                        json={"inputs": text}
+                    )
+                    
+                    if response.status_code == 200:
+                        res_json = response.json()
+                        return flatten_to_float_list(res_json)
+                    elif response.status_code == 503 and attempt < 2:
+                        res_json = response.json()
+                        est_time = res_json.get("estimated_time", 5.0)
+                        sleep_time = min(est_time, 10.0)
+                        logger.info(f"HF model is loading. Sleeping for {sleep_time}s before retry (attempt {attempt + 1})...")
+                        await asyncio.sleep(sleep_time)
+                    else:
+                        raise RuntimeError(
+                            f"Hugging Face Inference API error (status {response.status_code}): {response.text}"
+                        )
+                except httpx.HTTPError as e:
+                    if attempt < 2:
+                        logger.warning(f"HF API request failed: {e}. Retrying...")
+                        await asyncio.sleep(2.0)
+                    else:
+                        raise RuntimeError(f"Hugging Face API request failed: {e}")
 
     async def index_schema(self, db: AsyncSession, data_source_id: UUID) -> None:
         """
@@ -49,10 +104,6 @@ class RAGService:
         generates embeddings, and saves them to the schema_embeddings table.
         Performs caching (AI-002) and incremental re-indexing (AI-003).
         """
-        if not settings.USE_LOCAL_EMBEDDINGS:
-            logger.info("Local embeddings are disabled. Skipping index_schema execution.")
-            return
-            
         logger.info(f"Indexing schema metadata for data source: {data_source_id}")
         
         # 1. Fetch metadata columns
