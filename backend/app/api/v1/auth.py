@@ -108,7 +108,7 @@ async def login(
         ))
         raise HTTPException(
             status_code=status.HTTP_423_LOCKED,
-            detail=str(e)
+            detail="Account temporarily locked due to too many failed login attempts. Please try again later."
         )
         
     auth_service = AuthService(db)
@@ -208,7 +208,7 @@ async def refresh(
         response.delete_cookie(key="refresh_token", path="/")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(e)
+            detail="Session expired or invalid. Please log in again."
         )
         
     response.set_cookie(

@@ -304,7 +304,7 @@ class DataSourceService:
                 # Execute on Postgres with pooling connection timeouts
                 engine = None
                 try:
-                    engine = create_engine(conn_str, connect_args=connect_args, timeout=15)
+                    engine = create_engine(conn_str, connect_args=connect_args, pool_timeout=10, pool_pre_ping=True)
                     with engine.connect() as conn:
                         result = conn.execute(text(sql))
                         columns = list(result.keys())

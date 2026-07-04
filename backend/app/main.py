@@ -59,7 +59,7 @@ def add_cors_headers(request: Request, response: JSONResponse) -> JSONResponse:
 # Global Database Exception Masking (SEC-009)
 @app.exception_handler(SQLAlchemyError)
 async def database_exception_handler(request: Request, exc: SQLAlchemyError):
-    request_id = request.headers.get("X-Request-ID", "unknown")
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     logger.exception(
         f"Database operation failed during {request.method} {request.url.path}: {exc}",
         extra={"request_id": request_id}
@@ -73,10 +73,47 @@ async def database_exception_handler(request: Request, exc: SQLAlchemyError):
         }
     ))
 
+from fastapi import HTTPException
+from fastapi.exceptions import RequestValidationError
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    return add_cors_headers(request, JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "status": "error",
+            "detail": exc.detail,
+            "request_id": request_id
+        }
+    ))
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    logger.warning(
+        f"Request validation failed during {request.method} {request.url.path}: {exc.errors()}",
+        extra={"request_id": request_id}
+    )
+    # Format errors cleanly
+    errors = []
+    for err in exc.errors():
+        loc = " -> ".join(str(x) for x in err.get("loc", []))
+        errors.append(f"{loc}: {err.get('msg', 'Invalid value')}")
+    detail_msg = "; ".join(errors) if errors else "Request validation failed."
+    return add_cors_headers(request, JSONResponse(
+        status_code=422,
+        content={
+            "status": "error",
+            "detail": detail_msg,
+            "request_id": request_id
+        }
+    ))
+
 # Global Unhandled Exception Masking (SEC-009)
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    request_id = request.headers.get("X-Request-ID", "unknown")
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     logger.exception(
         f"Unhandled system error during {request.method} {request.url.path}: {exc}",
         extra={"request_id": request_id}
@@ -85,7 +122,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={
             "status": "error",
-            "detail": f"An internal error occurred: {str(exc)}",
+            "detail": "An unexpected internal error occurred. Please try again or contact support.",
             "request_id": request_id
         }
     ))

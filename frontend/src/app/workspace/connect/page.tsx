@@ -23,22 +23,76 @@ export default function ConnectDataSourcePage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+
+    // Trim inputs
+    const trimmedName = name.trim();
+    const trimmedHost = host.trim();
+    const trimmedPort = port.trim();
+    const trimmedUsername = username.trim();
+    const trimmedDatabaseName = databaseName.trim();
+    const trimmedSchemaName = schemaName.trim();
+
+    // 1. Validate connection name
+    if (!trimmedName) {
+      setError("Connection name cannot be empty or whitespace only.");
+      return;
+    }
+
+    // 2. Validate engine-specific details
+    if (type !== "sqlite") {
+      if (!trimmedHost) {
+        setError("Host cannot be empty or whitespace only.");
+        return;
+      }
+      
+      // Host format validation (SSRF and loopback prevention)
+      const lowercaseHost = trimmedHost.toLowerCase();
+      const blockedHostnames = ["localhost", "127.0.0.1", "metadata.google.internal", "169.254.169.254", "metadata.internal"];
+      if (blockedHostnames.includes(lowercaseHost) || lowercaseHost.startsWith("10.") || lowercaseHost.startsWith("192.168.") || lowercaseHost.startsWith("172.")) {
+        setError("Connection to localhost, private IP ranges, or cloud metadata endpoints is not allowed.");
+        return;
+      }
+
+      const parsedPort = parseInt(trimmedPort);
+      if (isNaN(parsedPort) || parsedPort < 1 || parsedPort > 65535) {
+        setError("Port must be a valid integer between 1 and 65535.");
+        return;
+      }
+
+      if (!trimmedUsername) {
+        setError("Username cannot be empty or whitespace only.");
+        return;
+      }
+    }
+
+    // 3. Validate database name
+    if (!trimmedDatabaseName) {
+      setError("Database name cannot be empty or whitespace only.");
+      return;
+    }
+
+    // 4. Validate schema name
+    if (!trimmedSchemaName) {
+      setError("Schema name cannot be empty or whitespace only.");
+      return;
+    }
+
     setLoading(true);
 
     const rawUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
     const apiHost = rawUrl.replace(/\/api\/v1\/?$/, "").replace(/\/$/, "");
 
     const payload = {
-      name,
+      name: trimmedName,
       type,
-      description: description || `Connection for ${name}`,
+      description: description.trim() || `Connection for ${trimmedName}`,
       connection_details: {
-        host: type === "sqlite" ? null : host,
-        port: type === "sqlite" ? null : (port ? parseInt(port) : null),
-        username: type === "sqlite" ? null : username,
+        host: type === "sqlite" ? null : trimmedHost,
+        port: type === "sqlite" ? null : parseInt(trimmedPort),
+        username: type === "sqlite" ? null : trimmedUsername,
         password: type === "sqlite" ? null : password,
-        database_name: databaseName,
-        schema_name: schemaName || "public"
+        database_name: trimmedDatabaseName,
+        schema_name: trimmedSchemaName
       }
     };
 

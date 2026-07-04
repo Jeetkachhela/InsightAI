@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 from typing import List, Dict, Any
 from app.core.database import get_db
 from app.api.deps import get_current_user
-from app.models.models import User
+from app.models.models import User, SchemaMetadata, SchemaRelationship
 from app.schemas.schemas import SchemaMetadataResponse, SchemaRelationshipResponse
 from app.services.datasource_service import DataSourceService
 
@@ -101,9 +101,8 @@ async def trigger_reindex(
         # Index embedding vectors in RAG
         await service.rag_service.index_schema(db, ds_id)
         
-        return {"status": "success", "message": f"Successfully re-indexed {len(metadata_objs)} columns."}
-    except Exception as e:
+    except Exception:
         raise HTTPException(
-            status_code=400,
-            detail=f"Re-indexing failed: {e}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Re-indexing failed. Please try again or contact support."
         )

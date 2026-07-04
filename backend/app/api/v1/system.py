@@ -32,7 +32,8 @@ async def check_groq_connectivity() -> str:
             else:
                 return f"unhealthy (status {res.status_code})"
     except Exception as e:
-        return f"unhealthy: {str(e)}"
+        logger.error(f"Groq connectivity check failed: {e}")
+        return "unhealthy: connection failed"
 
 @router.get("/health")
 async def health_check(db: AsyncSession = Depends(get_db)):
@@ -44,7 +45,8 @@ async def health_check(db: AsyncSession = Depends(get_db)):
     try:
         await db.execute(text("SELECT 1"))
     except Exception as e:
-        db_status = f"unhealthy: {str(e)}"
+        logger.error(f"Database health check failed: {e}")
+        db_status = "unhealthy: connection failed"
         
     # 2. Check Vector store (pgvector)
     vector_status = "healthy"
@@ -53,7 +55,8 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         emb_count = res.scalar() or 0
         vector_status = f"healthy ({emb_count} embeddings)"
     except Exception as e:
-        vector_status = f"unhealthy: {str(e)}"
+        logger.error(f"Vector store health check failed: {e}")
+        vector_status = "unhealthy: count query failed"
         
     # 3. Check Groq Connectivity
     groq_status = await check_groq_connectivity()

@@ -1,5 +1,6 @@
 import sqlite3
 from typing import List, Dict, Any, Tuple
+from urllib.parse import quote_plus
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import create_async_engine
 from app.models.models import SchemaMetadata, SchemaRelationship
@@ -11,6 +12,7 @@ class SchemaDiscoveryService:
     def _get_connection_string(conn_details: Dict[str, Any], db_type: str) -> str:
         """
         Reconstructs the connection string from encrypted connection details.
+        Uses urllib.parse.quote_plus to safely encode credentials (SEC-015).
         """
         if db_type == "sqlite":
             return f"sqlite:///{conn_details['database_name']}"
@@ -20,13 +22,13 @@ class SchemaDiscoveryService:
         if conn_details.get("password_encrypted"):
             password = decrypt_credential(conn_details["password_encrypted"])
             
-        username = conn_details.get("username", "")
+        username = quote_plus(conn_details.get("username", ""))
         host = conn_details.get("host", "localhost")
         port = conn_details.get("port", 5432)
         db_name = conn_details["database_name"]
         
         if password:
-            return f"postgresql://{username}:{password}@{host}:{port}/{db_name}"
+            return f"postgresql://{username}:{quote_plus(password)}@{host}:{port}/{db_name}"
         return f"postgresql://{username}@{host}:{port}/{db_name}"
 
     async def discover_schema(self, conn_details: Dict[str, Any], db_type: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -113,7 +115,12 @@ class SchemaDiscoveryService:
         # because async dynamic driver generation is more complex and schema discovery is a backend admin task.
         engine = None
         try:
-            engine = create_engine(conn_str)
+            engine = create_engine(
+                conn_str,
+                connect_args={"connect_timeout": 10},
+                pool_timeout=10,
+                pool_pre_ping=True
+            )
             with engine.connect() as conn:
                 # 1. Query columns
                 col_query = text("""

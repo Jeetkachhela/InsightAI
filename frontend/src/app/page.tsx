@@ -58,8 +58,52 @@ export default function LandingAndAuthPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    setLoading(true);
 
+    // Normalization & whitespace validation
+    const trimmedEmail = email.trim();
+    const trimmedPassword = password.trim();
+
+    if (!trimmedEmail) {
+      setError("Email address cannot be empty or whitespace only.");
+      return;
+    }
+    if (!trimmedPassword) {
+      setError("Password cannot be empty or whitespace only.");
+      return;
+    }
+
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(trimmedEmail)) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+
+    // Password strength check on Register (parity with backend requirements)
+    if (!isLogin) {
+      if (trimmedPassword.length < 8) {
+        setError("Password must be at least 8 characters long.");
+        return;
+      }
+      if (!/[A-Z]/.test(trimmedPassword)) {
+        setError("Password must contain at least one uppercase letter.");
+        return;
+      }
+      if (!/[a-z]/.test(trimmedPassword)) {
+        setError("Password must contain at least one lowercase letter.");
+        return;
+      }
+      if (!/[0-9]/.test(trimmedPassword)) {
+        setError("Password must contain at least one digit.");
+        return;
+      }
+      if (!/[!@#$%^&*(),.?":{}|<>]/.test(trimmedPassword)) {
+        setError("Password must contain at least one special character.");
+        return;
+      }
+    }
+
+    setLoading(true);
     const endpoint = isLogin ? "/api/v1/auth/login" : "/api/v1/auth/register";
 
     try {
@@ -69,7 +113,7 @@ export default function LandingAndAuthPage() {
           "Content-Type": "application/json",
         },
         credentials: "include",
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: trimmedEmail, password: trimmedPassword }),
       });
 
       const data = await response.json();
@@ -81,7 +125,7 @@ export default function LandingAndAuthPage() {
       if (data.access_token) {
         localStorage.setItem("token", data.access_token);
       }
-      localStorage.setItem("user_email", email);
+      localStorage.setItem("user_email", trimmedEmail);
       
       // Transition directly to main workspace page
       router.push("/workspace");

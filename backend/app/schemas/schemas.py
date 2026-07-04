@@ -1,4 +1,6 @@
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
+import re
+import ipaddress
 from uuid import UUID
 from datetime import datetime
 from typing import List, Optional, Any, Dict
@@ -8,7 +10,20 @@ class UserBase(BaseModel):
     email: EmailStr = Field(..., max_length=255)
 
 class UserRegister(UserBase):
-    password: str = Field(..., min_length=6, max_length=128)
+    password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        if not re.search(r"[A-Z]", v):
+            raise ValueError("Password must contain at least one uppercase letter.")
+        if not re.search(r"[a-z]", v):
+            raise ValueError("Password must contain at least one lowercase letter.")
+        if not re.search(r"[0-9]", v):
+            raise ValueError("Password must contain at least one digit.")
+        if not re.search(r'[!@#$%^&*(),.?":{}|<>]', v):
+            raise ValueError("Password must contain at least one special character.")
+        return v
 
 class UserLogin(UserBase):
     password: str = Field(..., max_length=128)
@@ -27,14 +42,66 @@ class TokenData(BaseModel):
     email: Optional[str] = None
     user_id: Optional[UUID] = None
 
+# --- SSRF Protection Helpers ---
+_BLOCKED_HOSTNAMES = frozenset([
+    "metadata.google.internal",
+    "169.254.169.254",  # AWS/GCP/Azure metadata
+    "metadata.internal",
+])
+
+def _is_private_ip(host: str) -> bool:
+    """Check if host resolves to a private/reserved IP range (SSRF protection)."""
+    try:
+        addr = ipaddress.ip_address(host)
+        return addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved
+    except ValueError:
+        return False
+
+# Hostname validation regex: RFC-compliant hostname or IPv4/IPv6
+_HOSTNAME_RE = re.compile(
+    r"^("
+    r"(?:(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z]{2,63})"  # hostname
+    r"|(?:\d{1,3}\.){3}\d{1,3}"  # IPv4
+    r"|(?:\[?[0-9a-fA-F:]+\]?)"  # IPv6
+    r")$"
+)
+
 # Database Connection Schemas
 class DatabaseConnectionCreate(BaseModel):
-    host: Optional[str] = None
-    port: Optional[int] = None
-    username: Optional[str] = None
-    password: Optional[str] = None
-    database_name: str
-    schema_name: Optional[str] = "public"
+    host: Optional[str] = Field(None, min_length=1, max_length=253)
+    port: Optional[int] = Field(None, ge=1, le=65535)
+    username: Optional[str] = Field(None, min_length=1, max_length=128)
+    password: Optional[str] = Field(None, max_length=256)
+    database_name: str = Field(..., min_length=1, max_length=128)
+    schema_name: Optional[str] = Field("public", min_length=1, max_length=63)
+
+    @field_validator("host")
+    @classmethod
+    def validate_host(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            raise ValueError("Host cannot be empty or whitespace only.")
+        if v.lower() in _BLOCKED_HOSTNAMES:
+            raise ValueError("Connection to this host is not allowed.")
+        if _is_private_ip(v):
+            raise ValueError("Connections to private/reserved IP ranges are not allowed.")
+        if not _HOSTNAME_RE.match(v):
+            raise ValueError("Invalid hostname or IP address format.")
+        return v
+
+    @field_validator("username", "database_name", "schema_name")
+    @classmethod
+    def reject_whitespace_only(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            v = v.strip()
+            if not v:
+                raise ValueError("This field cannot be empty or whitespace only.")
+            # Reject control characters and dangerous Unicode
+            if re.search(r"[\x00-\x1f\x7f]", v):
+                raise ValueError("This field contains invalid control characters.")
+        return v
 
 class DatabaseConnectionResponse(BaseModel):
     host: Optional[str]
@@ -47,10 +114,28 @@ class DatabaseConnectionResponse(BaseModel):
 
 # Data Source Schemas
 class DataSourceCreate(BaseModel):
-    name: str = Field(..., max_length=100)
+    name: str = Field(..., min_length=1, max_length=100)
     type: str = Field(..., max_length=50)  # postgresql, mysql, sqlite
     description: Optional[str] = Field(None, max_length=1000)
     connection_details: DatabaseConnectionCreate
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Data source name cannot be empty or whitespace only.")
+        if re.search(r"[\x00-\x1f\x7f]", v):
+            raise ValueError("Name contains invalid control characters.")
+        return v
+
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, v: str) -> str:
+        allowed = {"postgresql", "mysql", "sqlite"}
+        if v.lower() not in allowed:
+            raise ValueError(f"Database type must be one of: {', '.join(sorted(allowed))}")
+        return v.lower()
 
 class DataSourceResponse(BaseModel):
     id: UUID

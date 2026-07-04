@@ -37,10 +37,15 @@ async def create_data_source(
             ds_in.connection_details.password
         )
         return created
-    except Exception as e:
+    except ValueError as ve:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to connect and save data source details: {str(e)}"
+            detail=str(ve)  # ValueError from our own validation (e.g. duplicate check) — safe
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to connect and save data source. Please verify your connection details and try again."
         )
 
 @router.get("/", response_model=List[DataSourceResponse])
@@ -110,8 +115,8 @@ async def delete_data_source(
             status_code=status.HTTP_412_PRECONDITION_FAILED,
             detail="Precondition Failed: Concurrent update detected."
         )
-    except Exception as e:
+    except Exception:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to delete datasource: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete data source. Please try again."
         )

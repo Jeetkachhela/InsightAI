@@ -41,10 +41,10 @@ async def generate_sql(
                 force_classification="sql_gen"
             )
             return result
-        except Exception as e:
+        except Exception:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Workflow execution failed: {str(e)}"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="SQL generation failed. The AI service may be temporarily unavailable. Please try again."
             )
 
 @router.post(
@@ -76,12 +76,12 @@ async def execute_sql(
         except ValueError as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(e)
+                detail=str(e)  # ValueError from SQL Firewall — safe user-facing message
             )
-        except Exception as e:
+        except Exception:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Execution error: {str(e)}"
+                detail="Query execution failed. Please verify the query and try again."
             )
 
 @router.post(
