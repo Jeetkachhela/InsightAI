@@ -1,4 +1,5 @@
 import hashlib
+import asyncio
 from typing import List, Dict, Any, Optional
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,8 +26,6 @@ class RAGService:
                 logger.error("Failed to import sentence-transformers. Please run pip install sentence-transformers.")
                 raise
         return cls._model
-
-import asyncio
 
     async def get_embedding_async(self, text: str) -> List[float]:
         """
