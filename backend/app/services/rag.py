@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.models.models import SchemaMetadata, SchemaRelationship, SchemaEmbedding
 from app.core.logging import logger
+from app.core.config import settings
 
 class RAGService:
     _model = None
@@ -16,21 +17,27 @@ class RAGService:
         Lazily initialize and load the SentenceTransformer model to avoid 
         overhead during startup when importing.
         """
+        if not settings.USE_LOCAL_EMBEDDINGS:
+            raise RuntimeError("Local embeddings are disabled by configuration settings.")
+
         if cls._model is None:
             try:
                 from sentence_transformers import SentenceTransformer
                 logger.info("Initializing SentenceTransformer model 'all-MiniLM-L6-v2'...")
                 cls._model = SentenceTransformer("all-MiniLM-L6-v2")
                 logger.info("SentenceTransformer model successfully loaded.")
-            except ImportError:
-                logger.error("Failed to import sentence-transformers. Please run pip install sentence-transformers.")
-                raise
+            except Exception as e:
+                logger.error(f"Failed to load sentence-transformers model: {e}")
+                raise RuntimeError(f"SentenceTransformer load failed: {e}")
         return cls._model
 
     async def get_embedding_async(self, text: str) -> List[float]:
         """
         Generates a vector embedding without blocking the async event loop.
         """
+        if not settings.USE_LOCAL_EMBEDDINGS:
+            raise RuntimeError("Local embeddings are disabled by configuration settings.")
+            
         def _generate():
             model = self._get_model()
             return model.encode(text).tolist()
@@ -42,6 +49,10 @@ class RAGService:
         generates embeddings, and saves them to the schema_embeddings table.
         Performs caching (AI-002) and incremental re-indexing (AI-003).
         """
+        if not settings.USE_LOCAL_EMBEDDINGS:
+            logger.info("Local embeddings are disabled. Skipping index_schema execution.")
+            return
+            
         logger.info(f"Indexing schema metadata for data source: {data_source_id}")
         
         # 1. Fetch metadata columns
@@ -148,32 +159,82 @@ class RAGService:
         """
         Computes query embedding, searches schema_embeddings using pgvector,
         and constructs a schema context representation.
+        Falls back to keyword metadata search if local embeddings are disabled or fail.
         """
         logger.info(f"Retrieving schema context for query: '{query}'")
         
-        query_vector = await self.get_embedding_async(query)
+        use_fallback = not settings.USE_LOCAL_EMBEDDINGS
+        similar_items = []
         
-        # Query pgvector for closest embeddings
-        result = await db.execute(
-            select(SchemaEmbedding)
-            .where(SchemaEmbedding.data_source_id == data_source_id)
-            .order_by(SchemaEmbedding.embedding.cosine_distance(query_vector))
-            .limit(top_k)
-        )
-        similar_items = result.scalars().all()
-        
-        # Group retrieve entities
-        tables = set()
-        columns = []
-        
-        for item in similar_items:
-            if item.entity_type == "table":
-                tables.add(item.entity_name)
-            elif item.entity_type == "column":
-                table_name = item.entity_name.split(".")[0]
-                tables.add(table_name)
-                columns.append(item.entity_name)
+        if not use_fallback:
+            try:
+                query_vector = await self.get_embedding_async(query)
                 
+                # Query pgvector for closest embeddings
+                result = await db.execute(
+                    select(SchemaEmbedding)
+                    .where(SchemaEmbedding.data_source_id == data_source_id)
+                    .order_by(SchemaEmbedding.embedding.cosine_distance(query_vector))
+                    .limit(top_k)
+                )
+                similar_items = result.scalars().all()
+            except Exception as e:
+                logger.warning(f"RAG embedding/vector search failed: {e}. Falling back to keyword-based schema retrieval.")
+                use_fallback = True
+                
+        tables = set()
+        
+        if not use_fallback:
+            for item in similar_items:
+                if item.entity_type == "table":
+                    tables.add(item.entity_name)
+                elif item.entity_type == "column":
+                    table_name = item.entity_name.split(".")[0]
+                    tables.add(table_name)
+        else:
+            # Keyword-based fallback search (highly memory efficient, zero RAM overhead)
+            import re
+            words = re.findall(r"\b[a-zA-Z0-9_]+\b", query.lower())
+            stopwords = {
+                "how", "many", "are", "there", "is", "a", "the", "of", "in", "for", "to", "with", 
+                "on", "at", "by", "from", "an", "select", "find", "show", "get", "list", "query", 
+                "sql", "database", "where", "filter", "having", "group", "by", "order", "limit",
+                "count", "sum", "avg", "min", "max"
+            }
+            keywords = [w for w in words if w not in stopwords and len(w) > 1]
+            
+            if not keywords:
+                logger.info("No query keywords found for fallback search. Retrieving all tables.")
+                all_tables_res = await db.execute(
+                    select(SchemaMetadata.table_name)
+                    .where(SchemaMetadata.data_source_id == data_source_id)
+                    .distinct()
+                )
+                tables = set(all_tables_res.scalars().all())
+            else:
+                from sqlalchemy import or_
+                conditions = []
+                for kw in keywords:
+                    conditions.append(SchemaMetadata.table_name.ilike(f"%{kw}%"))
+                    conditions.append(SchemaMetadata.column_name.ilike(f"%{kw}%"))
+                    
+                match_res = await db.execute(
+                    select(SchemaMetadata.table_name)
+                    .where(SchemaMetadata.data_source_id == data_source_id)
+                    .where(or_(*conditions))
+                    .distinct()
+                )
+                tables = set(match_res.scalars().all())
+                
+                # If nothing matched, default to retrieving all tables
+                if not tables:
+                    all_tables_res = await db.execute(
+                        select(SchemaMetadata.table_name)
+                        .where(SchemaMetadata.data_source_id == data_source_id)
+                        .distinct()
+                    )
+                    tables = set(all_tables_res.scalars().all())
+
         # Fetch actual metadata for these matched tables
         tables_list = list(tables)
         if not tables_list:
