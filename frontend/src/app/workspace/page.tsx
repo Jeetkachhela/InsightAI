@@ -108,6 +108,13 @@ export default function WorkspacePage() {
     };
     try {
       const res = await fetch(url, mergedOptions);
+      if (res.status === 401) {
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("token");
+          localStorage.removeItem("user_email");
+          window.location.href = "/";
+        }
+      }
       if (!res.ok && (res.status >= 500 || res.status === 429) && retries > 0) {
         logger("Transient API warning. Retrying connection...");
         await new Promise(r => setTimeout(r, backoff));

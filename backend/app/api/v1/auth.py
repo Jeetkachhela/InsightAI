@@ -203,9 +203,9 @@ async def refresh(
             refresh_token, ip_address=ip, user_agent=user_agent
         )
     except ValueError as e:
-        # Clear cookies on failed refresh
-        response.delete_cookie(key="access_token", path="/")
-        response.delete_cookie(key="refresh_token", path="/")
+        # Clear cookies on failed refresh with exact matching attributes (SEC-005)
+        response.delete_cookie(key="access_token", path="/", secure=not settings.DEBUG, samesite="lax", httponly=True)
+        response.delete_cookie(key="refresh_token", path="/", secure=not settings.DEBUG, samesite="lax", httponly=True)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session expired or invalid. Please log in again."
@@ -265,8 +265,9 @@ async def logout_all_devices(
     auth_service = AuthService(db)
     await auth_service.logout_all_sessions(current_user.id)
     
-    response.delete_cookie(key="access_token", path="/")
-    response.delete_cookie(key="refresh_token", path="/")
+    # Clear cookies with exact matching attributes (SEC-005)
+    response.delete_cookie(key="access_token", path="/", secure=not settings.DEBUG, samesite="lax", httponly=True)
+    response.delete_cookie(key="refresh_token", path="/", secure=not settings.DEBUG, samesite="lax", httponly=True)
     return {"detail": "Logged out from all devices"}
 
 @router.delete("/sessions/{session_id}")

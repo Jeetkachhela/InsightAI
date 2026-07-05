@@ -5,14 +5,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, func
 from app.core.logging import logger
 from sqlalchemy.future import select
-from datetime import datetime
+from datetime import datetime, timezone
 from app.core.database import get_db
 from app.core.config import settings
 from app.models.models import User, DataSource, SchemaEmbedding, Message, QueryLog, AuditLog
 
 router = APIRouter()
 
-START_TIME = datetime.utcnow()
+START_TIME = datetime.now(timezone.utc).replace(tzinfo=None)
 
 async def check_groq_connectivity() -> str:
     """
@@ -67,20 +67,25 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         
     return {
         "status": overall,
-        "timestamp": datetime.utcnow(),
+        "timestamp": datetime.now(timezone.utc).replace(tzinfo=None),
         "database": db_status,
         "vector_store": vector_status,
         "groq": groq_status,
         "version": "1.0.0"
     }
 
+from app.api.deps import get_current_user
+
 @router.get("/metrics")
-async def get_metrics(db: AsyncSession = Depends(get_db)):
+async def get_metrics(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """
     Detailed runtime and resource metrics tracking (ARCH-003, ARCH-004) covering latency, tokens, error rates.
     """
     # 1. System stats
-    uptime_seconds = int((datetime.utcnow() - START_TIME).total_seconds())
+    uptime_seconds = int((datetime.now(timezone.utc).replace(tzinfo=None) - START_TIME).total_seconds())
     
     # 2. Users count
     user_res = await db.execute(select(func.count(User.id)))

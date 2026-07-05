@@ -20,14 +20,15 @@ async def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     
-    # 1. Check cookies first (SEC-005)
-    token = request.cookies.get("access_token")
-    
-    # 2. Check Auth header as fallback for tests/external API clients
+    # 1. Check Auth header first (most explicit client action)
+    token = None
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+        
+    # 2. Check cookies as fallback (SEC-005)
     if not token:
-        auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header.split(" ")[1]
+        token = request.cookies.get("access_token")
             
     if not token:
         raise credentials_exception

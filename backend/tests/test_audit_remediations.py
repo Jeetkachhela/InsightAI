@@ -57,3 +57,62 @@ def test_workspace_concurrency_locking():
             
         assert lock.locked() is False
     asyncio.run(run_test())
+
+def test_get_current_user_header_precedence():
+    from unittest.mock import AsyncMock, MagicMock
+    from uuid import uuid4
+    from datetime import datetime, timezone, timedelta
+    from app.api.deps import get_current_user
+    from app.models.models import User, UserSession
+    from app.core.security import create_access_token
+    
+    user_id = uuid4()
+    session_id = uuid4()
+    
+    user_data = {"sub": "test@user.com", "user_id": str(user_id)}
+    valid_header_token = create_access_token(data=user_data, jti=str(session_id))
+    expired_cookie_token = "malformed_or_expired_jwt"
+    
+    request = MagicMock()
+    request.headers = {"Authorization": f"Bearer {valid_header_token}"}
+    request.cookies = {"access_token": expired_cookie_token}
+    
+    db = AsyncMock()
+    
+    mock_session = UserSession(
+        id=session_id,
+        user_id=user_id,
+        is_active=True,
+        expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=1)
+    )
+    
+    mock_user = User(
+        id=user_id,
+        email="test@user.com"
+    )
+    
+    session_result = MagicMock()
+    session_result.scalar_one_or_none.return_value = mock_session
+    
+    user_result = MagicMock()
+    user_result.scalar_one_or_none.return_value = mock_user
+    
+    db.execute.side_effect = [session_result, user_result]
+    
+    async def run_get_user():
+        return await get_current_user(request=request, db=db)
+        
+    current_user = asyncio.run(run_get_user())
+    
+    assert current_user.id == user_id
+    assert current_user.email == "test@user.com"
+    assert db.execute.call_count == 2
+
+def test_metrics_endpoint_unauthenticated():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    
+    client = TestClient(app)
+    response = client.get("/api/v1/system/metrics")
+    assert response.status_code == 401
+
