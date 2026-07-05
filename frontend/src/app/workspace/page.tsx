@@ -137,8 +137,22 @@ export default function WorkspacePage() {
 
   // FE-001 & FE-010: Active session validation on mount
   useEffect(() => {
-    const rawUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    const backendUrl = rawUrl.replace(/\/api\/v1\/?$/, "").replace(/\/$/, "");
+    const getBackendUrl = () => {
+      const envUrl = process.env.NEXT_PUBLIC_API_URL;
+      if (envUrl) {
+        return envUrl.replace(/\/api\/v1\/?$/, "").replace(/\/$/, "");
+      }
+      if (typeof window !== "undefined") {
+        const hostname = window.location.hostname;
+        const protocol = window.location.protocol;
+        if (hostname === "127.0.0.1" || hostname === "localhost") {
+          return `${protocol}//${hostname}:8000`;
+        }
+        return `${protocol}//${window.location.host}`;
+      }
+      return "http://localhost:8000";
+    };
+    const backendUrl = getBackendUrl();
     setApiHost(backendUrl);
     
     const checkSession = async () => {

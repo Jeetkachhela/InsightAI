@@ -146,7 +146,7 @@ async def add_request_id_and_log(request: Request, call_next):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.FRONTEND_ORIGINS if settings.FRONTEND_ORIGINS else ["http://localhost:3000"],
-    allow_origin_regex=r"https://.*\.vercel\.app|http://localhost:\d+|https://.*\.onrender\.com",
+    allow_origin_regex=r"https://.*\.vercel\.app|http://localhost:\d+|http://127.0.0.1:\d+|https://.*\.onrender\.com",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

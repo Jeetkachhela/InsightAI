@@ -25,7 +25,6 @@ class Settings(BaseModel):
     AES_KEYS: str = "{}"
     ACTIVE_AES_KEY_VERSION: str = "v1"
     FRONTEND_ORIGINS: List[str] = []
-    USE_LOCAL_EMBEDDINGS: bool = False
 
     model_config = {
         "frozen": True
@@ -42,10 +41,6 @@ aes_key = os.getenv("AES_KEY", "")
 aes_keys_raw = os.getenv("AES_KEYS", "")
 active_aes_version = os.getenv("ACTIVE_AES_KEY_VERSION", "v1")
 origins_raw = os.getenv("FRONTEND_ORIGINS", "http://localhost:3000")
-use_local_embs_raw = os.getenv("USE_LOCAL_EMBEDDINGS", "true" if env != "production" else "false")
-use_local_embs = use_local_embs_raw.lower() in ("true", "1", "yes")
-
-# Parse origins
 origins = [o.strip() for o in origins_raw.split(",") if o.strip()]
 
 # 2. Strict Startup Validation
@@ -126,6 +121,5 @@ settings = Settings(
     AES_KEY=aes_key,
     AES_KEYS=aes_keys_raw,
     ACTIVE_AES_KEY_VERSION=active_aes_version,
-    FRONTEND_ORIGINS=origins,
-    USE_LOCAL_EMBEDDINGS=use_local_embs
+    FRONTEND_ORIGINS=origins
 )
