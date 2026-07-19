@@ -45,11 +45,11 @@ export default function ConnectDataSourcePage() {
         return;
       }
       
-      // Host format validation (SSRF and loopback prevention)
+      // Host format validation (SSRF metadata protection)
       const lowercaseHost = trimmedHost.toLowerCase();
-      const blockedHostnames = ["localhost", "127.0.0.1", "metadata.google.internal", "169.254.169.254", "metadata.internal"];
-      if (blockedHostnames.includes(lowercaseHost) || lowercaseHost.startsWith("10.") || lowercaseHost.startsWith("192.168.") || lowercaseHost.startsWith("172.")) {
-        setError("Connection to localhost, private IP ranges, or cloud metadata endpoints is not allowed.");
+      const blockedHostnames = ["metadata.google.internal", "169.254.169.254", "metadata.internal"];
+      if (blockedHostnames.includes(lowercaseHost)) {
+        setError("Connection to cloud metadata endpoints is not allowed.");
         return;
       }
 

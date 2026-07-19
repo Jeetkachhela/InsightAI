@@ -49,21 +49,24 @@ _BLOCKED_HOSTNAMES = frozenset([
     "metadata.internal",
 ])
 
-def _is_private_ip(host: str) -> bool:
-    """Check if host resolves to a private/reserved IP range (SSRF protection)."""
+def _is_cloud_metadata_ip(host: str) -> bool:
+    """Check if host resolves to a cloud metadata IP (SSRF protection)."""
     try:
         addr = ipaddress.ip_address(host)
-        return addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved
+        # Block cloud metadata addresses (169.254.169.254, link-local, reserved)
+        return addr.is_link_local or addr.is_reserved or str(addr) == "169.254.169.254"
     except ValueError:
         return False
 
-# Hostname validation regex: RFC-compliant hostname or IPv4/IPv6
+# Hostname validation regex: RFC-compliant hostname, localhost, or IPv4/IPv6
 _HOSTNAME_RE = re.compile(
     r"^("
-    r"(?:(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z]{2,63})"  # hostname
+    r"localhost"
+    r"|(?:(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z]{2,63})"  # hostname
     r"|(?:\d{1,3}\.){3}\d{1,3}"  # IPv4
     r"|(?:\[?[0-9a-fA-F:]+\]?)"  # IPv6
-    r")$"
+    r")$",
+    re.IGNORECASE
 )
 
 # Database Connection Schemas
@@ -84,9 +87,9 @@ class DatabaseConnectionCreate(BaseModel):
         if not v:
             raise ValueError("Host cannot be empty or whitespace only.")
         if v.lower() in _BLOCKED_HOSTNAMES:
-            raise ValueError("Connection to this host is not allowed.")
-        if _is_private_ip(v):
-            raise ValueError("Connections to private/reserved IP ranges are not allowed.")
+            raise ValueError("Connection to cloud metadata endpoints is not allowed.")
+        if _is_cloud_metadata_ip(v):
+            raise ValueError("Connection to cloud metadata IP ranges is not allowed.")
         if not _HOSTNAME_RE.match(v):
             raise ValueError("Invalid hostname or IP address format.")
         return v
