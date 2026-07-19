@@ -354,13 +354,30 @@ class DataSourceService:
         except Exception as e:
             status = "error"
             logger.error(f"SQL Execution error: {e}")
+            err_str = str(e)
+            
+            if "Connection refused" in err_str or "could not connect to server" in err_str.lower():
+                host_name = conn_dict.get("host", "localhost")
+                port_num = conn_dict.get("port", 5432)
+                err_msg = (
+                    f"Connection Refused: Could not connect to PostgreSQL server at '{host_name}:{port_num}'. "
+                    f"If connecting to a local database, please ensure your local PostgreSQL service is running and listening on port {port_num}. "
+                    f"If running in a cloud deployment, 'localhost' is not accessible; please use a publicly accessible database host (e.g. Neon PostgreSQL, AWS RDS, or Supabase)."
+                )
+            elif "password authentication failed" in err_str.lower():
+                err_msg = "Authentication Failed: Incorrect database username or password."
+            elif "database" in err_str.lower() and "does not exist" in err_str.lower():
+                err_msg = f"Database Error: Database '{conn_dict.get('database_name')}' does not exist on target host."
+            else:
+                err_msg = f"Database Execution Error: {err_str}"
+
             audit = AuditLog(
                 user_id=user_id,
                 action="QUERY_EXECUTION_ERROR",
-                details=f"Query execution failed on {ds.name}: {str(e)} for query: {sql}"
+                details=f"Query execution failed on {ds.name}: {err_msg} for query: {sql}"
             )
             await self.audit_repo.log(audit)
-            raise ValueError(f"Database Execution Error: {str(e)}")
+            raise ValueError(err_msg)
         finally:
             execution_time_ms = int((time.perf_counter() - start_time) * 1000)
             

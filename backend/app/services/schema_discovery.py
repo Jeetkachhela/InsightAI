@@ -27,9 +27,13 @@ class SchemaDiscoveryService:
         port = conn_details.get("port", 5432)
         db_name = conn_details["database_name"]
         
+        ssl_suffix = ""
+        if "?" not in db_name and any(cloud_domain in host.lower() for cloud_domain in [".neon.tech", ".rds.amazonaws.com", ".supabase.co", ".render.com", ".elephantsql.com"]):
+            ssl_suffix = "?sslmode=require"
+        
         if password:
-            return f"postgresql://{username}:{quote_plus(password)}@{host}:{port}/{db_name}"
-        return f"postgresql://{username}@{host}:{port}/{db_name}"
+            return f"postgresql://{username}:{quote_plus(password)}@{host}:{port}/{db_name}{ssl_suffix}"
+        return f"postgresql://{username}@{host}:{port}/{db_name}{ssl_suffix}"
 
     async def discover_schema(self, conn_details: Dict[str, Any], db_type: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
