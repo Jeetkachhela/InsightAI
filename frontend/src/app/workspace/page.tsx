@@ -7,7 +7,7 @@ import {
   Play, BookOpen, Lightbulb, RefreshCw, Terminal, Eye,
   Database, GitFork, AlertTriangle, CheckCircle2,
   Table, LogOut, Loader2, Sparkles, AlertCircle, Plus,
-  History, BarChart2
+  History, BarChart2, Trash2, FileText
 } from "lucide-react";
 
 import SchemaExplorer from "@/components/workspace/SchemaExplorer";
@@ -15,6 +15,7 @@ import RelationshipExplorer from "@/components/workspace/RelationshipExplorer";
 import QueryHistory from "@/components/workspace/QueryHistory";
 import TeachingPanel from "@/components/workspace/TeachingPanel";
 import SQLResultsViewer from "@/components/workspace/SQLResultsViewer";
+import ConfirmModal from "@/components/workspace/ConfirmModal";
 
 // 1. Strict TypeScript Interfaces (FE-004)
 interface DataSource {
@@ -85,11 +86,18 @@ export default function WorkspacePage() {
   const [execResult, setExecResult] = useState<any>(null);
   const [execError, setExecError] = useState("");
   const [executing, setExecuting] = useState(false);
-  const [activeTabBottom, setActiveTabBottom] = useState<"results" | "chart" | "actions">("results");
+  const [activeTabBottom, setActiveTabBottom] = useState<"results" | "chart" | "actions" | "explanation">("results");
 
-  // UI toggles
+  // UI toggles & Confirmation Modals State
   const [teachingMode, setTeachingMode] = useState(false);
   const [queryHistory, setQueryHistory] = useState<QueryLog[]>([]);
+
+  // Confirmation Modals
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [dsToDelete, setDsToDelete] = useState<DataSource | null>(null);
+  const [logToDelete, setLogToDelete] = useState<string | null>(null);
+  const [showClearHistoryModal, setShowClearHistoryModal] = useState(false);
+  const [modalLoading, setModalLoading] = useState(false);
 
   // Chart visualizer options
   const [chartType, setChartType] = useState<"bar" | "line" | "pie">("bar");
@@ -394,8 +402,38 @@ export default function WorkspacePage() {
     }
   };
 
-  // Log out
-  const handleLogout = async () => {
+  // SQL → Natural Language Translation (Explain SQL)
+  const handleExplainSQL = async () => {
+    if (!sql.trim() || !activeDs) return;
+    setLoadingSql(true);
+    setExplanation("");
+    setExecError("");
+    try {
+      const response = await fetchWithRetry(`${apiHost}/api/v1/sql/explain`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          sql: sql,
+          data_source_id: activeDs.id
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || "Failed to explain SQL query.");
+      }
+      setExplanation(data.explanation || "No explanation returned.");
+      setActiveTabBottom("explanation");
+    } catch (err: any) {
+      setExecError(err.message || "Failed to translate SQL to Natural Language.");
+    } finally {
+      setLoadingSql(false);
+    }
+  };
+
+  // Confirmation Modal Handlers
+  const handleConfirmLogout = async () => {
+    setModalLoading(true);
     try {
       await fetchWithRetry(`${apiHost}/api/v1/auth/logout`, {
         method: "POST",
@@ -403,10 +441,83 @@ export default function WorkspacePage() {
       });
     } catch (err) {
       // Ignore network errors on logout
+    } finally {
+      setModalLoading(false);
+      setShowLogoutModal(false);
+      localStorage.removeItem("token");
+      localStorage.removeItem("user_email");
+      router.push("/");
     }
-    localStorage.removeItem("token");
-    localStorage.removeItem("user_email");
-    router.push("/");
+  };
+
+  const handleConfirmDeleteDs = async () => {
+    if (!dsToDelete) return;
+    setModalLoading(true);
+    try {
+      const res = await fetchWithRetry(`${apiHost}/api/v1/data-sources/${dsToDelete.id}`, {
+        method: "DELETE",
+        credentials: "include"
+      });
+      if (res.ok || res.status === 204) {
+        const remaining = dataSources.filter(d => d.id !== dsToDelete.id);
+        setDataSources(remaining);
+        if (activeDs?.id === dsToDelete.id) {
+          const nextDs = remaining[0] || null;
+          setActiveDs(nextDs);
+          if (nextDs) {
+            fetchSchema(nextDs.id, apiHost);
+          } else {
+            setMetadata([]);
+            setRelationships([]);
+          }
+        }
+      } else {
+        const data = await res.json().catch(() => ({ detail: "Failed to delete data source" }));
+        setExecError(data.detail || "Failed to delete data source.");
+      }
+    } catch (err: any) {
+      setExecError(err.message || "Failed to delete data source.");
+    } finally {
+      setModalLoading(false);
+      setDsToDelete(null);
+    }
+  };
+
+  const handleConfirmDeleteQueryLog = async () => {
+    if (!logToDelete) return;
+    setModalLoading(true);
+    try {
+      const res = await fetchWithRetry(`${apiHost}/api/v1/history/query-logs/${logToDelete}`, {
+        method: "DELETE",
+        credentials: "include"
+      });
+      if (res.ok) {
+        setQueryHistory(prev => prev.filter(l => l.id !== logToDelete));
+      }
+    } catch (err: any) {
+      console.error("Failed to delete query log", err);
+    } finally {
+      setModalLoading(false);
+      setLogToDelete(null);
+    }
+  };
+
+  const handleConfirmClearHistory = async () => {
+    setModalLoading(true);
+    try {
+      const res = await fetchWithRetry(`${apiHost}/api/v1/history/query-logs`, {
+        method: "DELETE",
+        credentials: "include"
+      });
+      if (res.ok) {
+        setQueryHistory([]);
+      }
+    } catch (err: any) {
+      console.error("Failed to clear query history", err);
+    } finally {
+      setModalLoading(false);
+      setShowClearHistoryModal(false);
+    }
   };
 
   const toggleTable = (tableName: string) => {
@@ -459,6 +570,16 @@ export default function WorkspacePage() {
                 <option value="">No databases</option>
               )}
             </select>
+
+            {activeDs && (
+              <button
+                onClick={() => setDsToDelete(activeDs)}
+                className="p-1.5 rounded text-zinc-500 hover:text-red-400 hover:bg-zinc-900 border border-transparent hover:border-zinc-800 transition-all cursor-pointer"
+                title={`Delete ${activeDs.name}`}
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
           </div>
 
           <button
@@ -490,7 +611,7 @@ export default function WorkspacePage() {
         <div className="flex items-center gap-4">
           <span className="text-xs text-zinc-400 font-medium">{email}</span>
           <button
-            onClick={handleLogout}
+            onClick={() => setShowLogoutModal(true)}
             className="p-1.5 rounded hover:bg-zinc-900 border border-transparent hover:border-zinc-800 text-zinc-400 hover:text-white transition-all cursor-pointer"
             title="Log Out"
           >
@@ -634,6 +755,14 @@ export default function WorkspacePage() {
                     
                     <div className="flex items-center gap-2">
                       <button
+                        onClick={handleExplainSQL}
+                        disabled={loadingSql || !sql.trim()}
+                        className="px-2.5 py-1 bg-violet-900/40 hover:bg-violet-800/50 border border-violet-700/40 text-[10px] text-violet-200 font-semibold rounded flex items-center gap-1 cursor-pointer transition-all shadow-sm"
+                        title="Translate SQL query into plain English natural language"
+                      >
+                        <BookOpen size={10} className="text-violet-400" /> SQL → Natural Language
+                      </button>
+                      <button
                         onClick={handleOptimizeSQL}
                         disabled={loadingSql || !sql.trim()}
                         className="px-2 py-1 bg-zinc-900 hover:bg-zinc-800 text-[10px] text-zinc-300 font-semibold rounded flex items-center gap-1 cursor-pointer"
@@ -702,6 +831,18 @@ export default function WorkspacePage() {
                   >
                     <BarChart2 size={13} /> Chart Visualizer
                   </button>
+                  {explanation && (
+                    <button
+                      onClick={() => setActiveTabBottom("explanation")}
+                      className={`px-6 py-3 text-xs font-semibold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
+                        activeTabBottom === "explanation"
+                          ? "border-violet-500 text-white"
+                          : "border-transparent text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      <BookOpen size={13} /> Natural Language Explanation
+                    </button>
+                  )}
                   {optReport && (
                     <button
                       onClick={() => setActiveTabBottom("actions")}
@@ -729,6 +870,29 @@ export default function WorkspacePage() {
                       onXAxisChange={setXAxisCol}
                       onYAxisChange={setYAxisCol}
                     />
+                  ) : activeTabBottom === "explanation" && explanation ? (
+                    <div className="h-full overflow-y-auto space-y-4 pr-2 text-xs">
+                      <div className="p-4 border border-violet-500/20 bg-violet-950/20 rounded-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="font-bold text-sm text-white flex items-center gap-2">
+                            <BookOpen size={16} className="text-violet-400" />
+                            SQL → Natural Language Breakdown
+                          </h4>
+                          <button
+                            onClick={() => {
+                              setNlQuery(explanation);
+                            }}
+                            className="text-[11px] text-violet-300 hover:text-white bg-violet-600/30 hover:bg-violet-600/50 border border-violet-500/40 px-2.5 py-1 rounded flex items-center gap-1 cursor-pointer transition-all"
+                            title="Use this explanation in the prompt box"
+                          >
+                            <Sparkles size={11} /> Load into Prompt
+                          </button>
+                        </div>
+                        <div className="text-zinc-300 leading-relaxed font-sans whitespace-pre-wrap">
+                          {explanation}
+                        </div>
+                      </div>
+                    </div>
                   ) : (
                     /* Render optimization report results inline */
                     activeTabBottom === "actions" && optReport && (
@@ -770,6 +934,59 @@ export default function WorkspacePage() {
           </div>
         )}
       </div>
+
+      {/* 4. Confirmation Modals */}
+      <ConfirmModal
+        isOpen={showLogoutModal}
+        title="Confirm Logout"
+        description="Are you sure you want to end your session? You will need to log back in to access your workspace and databases."
+        confirmText="Log Out"
+        cancelText="Cancel"
+        variant="danger"
+        iconType="logout"
+        isLoading={modalLoading}
+        onConfirm={handleConfirmLogout}
+        onClose={() => setShowLogoutModal(false)}
+      />
+
+      <ConfirmModal
+        isOpen={!!dsToDelete}
+        title={`Delete Data Source: ${dsToDelete?.name || ""}`}
+        description={`Are you sure you want to delete "${dsToDelete?.name}"? This action cannot be undone and will permanently remove all associated schema metadata, relationships, and history.`}
+        confirmText="Delete Data Source"
+        cancelText="Cancel"
+        variant="danger"
+        iconType="danger"
+        isLoading={modalLoading}
+        onConfirm={handleConfirmDeleteDs}
+        onClose={() => setDsToDelete(null)}
+      />
+
+      <ConfirmModal
+        isOpen={!!logToDelete}
+        title="Delete Query Log Entry"
+        description="Are you sure you want to remove this query entry from your history?"
+        confirmText="Delete Entry"
+        cancelText="Cancel"
+        variant="danger"
+        iconType="danger"
+        isLoading={modalLoading}
+        onConfirm={handleConfirmDeleteQueryLog}
+        onClose={() => setLogToDelete(null)}
+      />
+
+      <ConfirmModal
+        isOpen={showClearHistoryModal}
+        title="Clear Query History"
+        description="Are you sure you want to clear your entire query execution history? This action cannot be undone."
+        confirmText="Clear All History"
+        cancelText="Cancel"
+        variant="danger"
+        iconType="danger"
+        isLoading={modalLoading}
+        onConfirm={handleConfirmClearHistory}
+        onClose={() => setShowClearHistoryModal(false)}
+      />
     </div>
   );
 }

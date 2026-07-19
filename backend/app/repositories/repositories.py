@@ -161,6 +161,26 @@ class QueryLogRepository:
         )
         return list(result.scalars().all())
 
+    async def delete_by_id(self, log_id: UUID, user_id: UUID) -> bool:
+        result = await self.db.execute(
+            select(QueryLog).where(QueryLog.id == log_id, QueryLog.user_id == user_id)
+        )
+        log_item = result.scalar_one_or_none()
+        if log_item:
+            await self.db.delete(log_item)
+            await self.db.flush()
+            return True
+        return False
+
+    async def clear_all_by_user(self, user_id: UUID) -> None:
+        result = await self.db.execute(
+            select(QueryLog).where(QueryLog.user_id == user_id)
+        )
+        logs = result.scalars().all()
+        for log_item in logs:
+            await self.db.delete(log_item)
+        await self.db.flush()
+
 class AuditLogRepository:
     def __init__(self, db: AsyncSession):
         self.db = db

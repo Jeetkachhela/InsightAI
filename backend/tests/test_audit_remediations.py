@@ -116,3 +116,28 @@ def test_metrics_endpoint_unauthenticated():
     response = client.get("/api/v1/system/metrics")
     assert response.status_code == 401
 
+def test_query_log_repository_deletion():
+    from unittest.mock import AsyncMock, MagicMock
+    from uuid import uuid4
+    from app.repositories.repositories import QueryLogRepository
+    from app.models.models import QueryLog
+    
+    db = AsyncMock()
+    user_id = uuid4()
+    log_id = uuid4()
+    
+    repo = QueryLogRepository(db)
+    
+    mock_log = QueryLog(id=log_id, user_id=user_id, query_text="SELECT 1")
+    exec_res = MagicMock()
+    exec_res.scalar_one_or_none.return_value = mock_log
+    db.execute.return_value = exec_res
+    
+    async def run_delete():
+        return await repo.delete_by_id(log_id, user_id)
+        
+    res = asyncio.run(run_delete())
+    assert res is True
+    db.delete.assert_called_once_with(mock_log)
+
+
