@@ -16,6 +16,10 @@ export default function ConnectDataSourcePage() {
   const [databaseName, setDatabaseName] = useState("");
   const [schemaName, setSchemaName] = useState("public");
   
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
+
   const [connectionUri, setConnectionUri] = useState("");
   const [inputMode, setInputMode] = useState<"fields" | "uri">("fields");
 
