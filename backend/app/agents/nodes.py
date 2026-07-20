@@ -7,21 +7,41 @@ from app.core.security import is_safe_select_query
 from app.agents.state import AgentState
 from app.core.logging import logger
 
-def get_llm():
+def get_llm(model_name: str = None):
     """
-    Initializes the Groq LLM client.
+    Initializes the Groq LLM client with multi-model fallback.
+    Prevents breakage when models deprecate by chaining active models.
     """
-    try:
-        return ChatGroq(
-            groq_api_key=settings.GROQ_API_KEY,
-            model_name="llama-3.3-70b-versatile",
-            temperature=0.0,
-            timeout=15.0,
-            max_retries=0
-        )
-    except Exception as e:
-        logger.error(f"Failed to initialize ChatGroq: {e}. AI features will run in mock/fallback mode.")
-        return None
+    models_to_try = [
+        model_name or settings.GROQ_MODEL_NAME,
+        "deepseek-r1-distill-llama-70b",
+        "qwen-2.5-coder-32b-instruct",
+        "llama-3.3-70b-specdec",
+        "llama3-70b-8192",
+        "llama-3.1-70b-versatile",
+        "llama3-8b-8192"
+    ]
+    
+    unique_models = []
+    for m in models_to_try:
+        if m and m not in unique_models:
+            unique_models.append(m)
+            
+    for m in unique_models:
+        try:
+            return ChatGroq(
+                groq_api_key=settings.GROQ_API_KEY,
+                model_name=m,
+                temperature=0.0,
+                timeout=15.0,
+                max_retries=0
+            )
+        except Exception as e:
+            logger.warning(f"Groq LLM model '{m}' initialization failed: {e}. Trying fallback...")
+            continue
+
+    logger.error("All Groq LLM models failed to initialize. AI features will run in mock/fallback mode.")
+    return None
 
 # Helper to clean JSON response from LLM
 def parse_json_response(text: str) -> Dict[str, Any]:
