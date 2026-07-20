@@ -135,7 +135,7 @@ class DataSourceCreate(BaseModel):
     @field_validator("type")
     @classmethod
     def validate_type(cls, v: str) -> str:
-        allowed = {"postgresql", "mysql", "sqlite"}
+        allowed = {"postgresql", "mysql", "sqlite", "neon", "supabase", "mongodb", "mariadb"}
         if v.lower() not in allowed:
             raise ValueError(f"Database type must be one of: {', '.join(sorted(allowed))}")
         return v.lower()

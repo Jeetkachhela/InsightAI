@@ -16,9 +16,56 @@ export default function ConnectDataSourcePage() {
   const [databaseName, setDatabaseName] = useState("");
   const [schemaName, setSchemaName] = useState("public");
   
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState(false);
+  const [connectionUri, setConnectionUri] = useState("");
+  const [inputMode, setInputMode] = useState<"fields" | "uri">("fields");
+
+  const parseConnectionUri = (uri: string) => {
+    setConnectionUri(uri);
+    try {
+      const trimmed = uri.trim();
+      if (!trimmed) return;
+
+      let parsedType = "postgresql";
+      if (trimmed.startsWith("postgresql://") || trimmed.startsWith("postgres://")) {
+        if (trimmed.includes("neon.tech")) parsedType = "neon";
+        else if (trimmed.includes("supabase.co")) parsedType = "supabase";
+        else parsedType = "postgresql";
+      } else if (trimmed.startsWith("mongodb://") || trimmed.startsWith("mongodb+srv://")) {
+        parsedType = "mongodb";
+      } else if (trimmed.startsWith("mysql://")) {
+        parsedType = "mysql";
+      }
+
+      setType(parsedType);
+
+      const normalized = trimmed.replace(/^mongodb\+srv:\/\//, "http://").replace(/^(postgresql|postgres|mysql):\/\//, "http://");
+      const urlObj = new URL(normalized);
+      if (urlObj.hostname) setHost(urlObj.hostname);
+      if (urlObj.port) setPort(urlObj.port);
+      else if (parsedType === "mysql") setPort("3306");
+      else setPort("5432");
+
+      if (urlObj.username) setUsername(decodeURIComponent(urlObj.username));
+      if (urlObj.password) setPassword(decodeURIComponent(urlObj.password));
+
+      const pathDb = urlObj.pathname.replace(/^\//, "").split("?")[0];
+      if (pathDb) setDatabaseName(pathDb);
+    } catch (err) {
+      // Passively ignore incomplete URIs while user types
+    }
+  };
+
+  const handleSelectEngine = (selectedEngine: string) => {
+    setType(selectedEngine);
+    if (selectedEngine === "sqlite") {
+      setDatabaseName("sample_ecommerce.db");
+      setSchemaName("main");
+    } else if (selectedEngine === "mysql") {
+      setPort("3306");
+    } else if (selectedEngine === "neon" || selectedEngine === "supabase" || selectedEngine === "postgresql") {
+      setPort("5432");
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -177,6 +224,75 @@ export default function ConnectDataSourcePage() {
             </div>
           )}
 
+          {/* Quick Engine Selector Badges */}
+          <div className="mb-6">
+            <label className="block text-xs font-medium text-zinc-400 mb-2">Select Database Engine / Cloud Preset</label>
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+              {[
+                { id: "neon", label: "Neon", icon: "⚡", desc: "Serverless Postgres" },
+                { id: "supabase", label: "Supabase", icon: "⚡", desc: "Cloud Postgres" },
+                { id: "postgresql", label: "PostgreSQL", icon: "🐘", desc: "Standard DB" },
+                { id: "mongodb", label: "MongoDB", icon: "🍃", desc: "Document NoSQL" },
+                { id: "mysql", label: "MySQL", icon: "🐬", desc: "Relational DB" },
+                { id: "sqlite", label: "SQLite", icon: "📁", desc: "Local / Sample" }
+              ].map((engine) => (
+                <button
+                  key={engine.id}
+                  type="button"
+                  onClick={() => handleSelectEngine(engine.id)}
+                  className={`p-2.5 rounded-lg border text-left flex flex-col items-center justify-center transition-all cursor-pointer ${
+                    type === engine.id
+                      ? "border-violet-500 bg-violet-500/10 text-white shadow-sm shadow-violet-500/20"
+                      : "border-zinc-800 bg-zinc-950/60 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+                  }`}
+                >
+                  <span className="text-lg mb-1">{engine.icon}</span>
+                  <span className="text-xs font-semibold">{engine.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Connection Mode Switcher */}
+          <div className="flex items-center gap-2 mb-4 p-1 rounded-lg bg-zinc-950/80 border border-zinc-800">
+            <button
+              type="button"
+              onClick={() => setInputMode("fields")}
+              className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-all ${
+                inputMode === "fields" ? "bg-zinc-800 text-white shadow" : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              Detailed Form Fields
+            </button>
+            <button
+              type="button"
+              onClick={() => setInputMode("uri")}
+              className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-all ${
+                inputMode === "uri" ? "bg-zinc-800 text-white shadow" : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              Paste Connection URI (Cloud String)
+            </button>
+          </div>
+
+          {inputMode === "uri" && (
+            <div className="mb-4 p-3 rounded-lg border border-violet-500/30 bg-violet-500/5">
+              <label className="block text-xs font-medium text-violet-300 mb-1">
+                Paste Cloud Connection URI (e.g. Neon, Supabase, MongoDB)
+              </label>
+              <input
+                type="text"
+                value={connectionUri}
+                onChange={(e) => parseConnectionUri(e.target.value)}
+                placeholder="postgresql://alex:password@ep-cool-db.neon.tech/neondb?sslmode=require"
+                className="w-full rounded-md border border-zinc-800 bg-zinc-950/90 px-3 py-2 text-xs text-white placeholder-zinc-500 outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 font-mono transition-all"
+              />
+              <p className="text-[10px] text-zinc-400 mt-1">
+                Auto-parses host, port, username, password, and database name into your connection settings below.
+              </p>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4" suppressHydrationWarning={true}>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -186,7 +302,7 @@ export default function ConnectDataSourcePage() {
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Production Analytics"
+                  placeholder="e.g. Production Cloud Analytics"
                   suppressHydrationWarning={true}
                   className="w-full rounded-md border border-zinc-800 bg-zinc-950/80 px-3 py-2 text-xs text-white placeholder-zinc-500 outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-all"
                 />
@@ -196,22 +312,16 @@ export default function ConnectDataSourcePage() {
                 <label className="block text-xs font-medium text-zinc-400 mb-1">Database Engine</label>
                 <select
                   value={type}
-                  onChange={(e) => {
-                    setType(e.target.value);
-                    if (e.target.value === "sqlite") {
-                      setDatabaseName("sample_ecommerce.db");
-                    } else if (e.target.value === "postgresql") {
-                      setPort("5432");
-                    } else if (e.target.value === "mysql") {
-                      setPort("3306");
-                    }
-                  }}
+                  onChange={(e) => handleSelectEngine(e.target.value)}
                   suppressHydrationWarning={true}
                   className="w-full rounded-md border border-zinc-800 bg-zinc-950/80 px-3 py-2 text-xs text-white outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-all"
                 >
-                  <option value="postgresql">PostgreSQL</option>
-                  <option value="mysql">MySQL</option>
-                  <option value="sqlite">SQLite</option>
+                  <option value="neon">⚡ Neon PostgreSQL (Cloud Serverless)</option>
+                  <option value="supabase">⚡ Supabase PostgreSQL (Cloud)</option>
+                  <option value="postgresql">🐘 PostgreSQL (Standard / AWS RDS)</option>
+                  <option value="mongodb">🍃 MongoDB (NoSQL Document Store)</option>
+                  <option value="mysql">🐬 MySQL / MariaDB</option>
+                  <option value="sqlite">📁 SQLite / Sample E-Commerce</option>
                 </select>
               </div>
             </div>

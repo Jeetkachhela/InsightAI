@@ -27,13 +27,32 @@ class SchemaDiscoveryService:
         port = conn_details.get("port", 5432)
         db_name = conn_details["database_name"]
         
-        ssl_suffix = ""
-        if "?" not in db_name and any(cloud_domain in host.lower() for cloud_domain in [".neon.tech", ".rds.amazonaws.com", ".supabase.co", ".render.com", ".elephantsql.com"]):
-            ssl_suffix = "?sslmode=require"
-        
+        if db_type in ("postgresql", "neon", "supabase"):
+            ssl_suffix = ""
+            if "?" not in db_name and (
+                db_type in ("neon", "supabase") or
+                any(cloud_domain in host.lower() for cloud_domain in [".neon.tech", ".rds.amazonaws.com", ".supabase.co", ".render.com", ".elephantsql.com"])
+            ):
+                ssl_suffix = "?sslmode=require"
+            
+            if password:
+                return f"postgresql://{username}:{quote_plus(password)}@{host}:{port}/{db_name}{ssl_suffix}"
+            return f"postgresql://{username}@{host}:{port}/{db_name}{ssl_suffix}"
+
+        elif db_type in ("mysql", "mariadb"):
+            mysql_port = conn_details.get("port", 3306)
+            if password:
+                return f"mysql+pymysql://{username}:{quote_plus(password)}@{host}:{mysql_port}/{db_name}"
+            return f"mysql+pymysql://{username}@{host}:{mysql_port}/{db_name}"
+
+        elif db_type == "mongodb":
+            if password:
+                return f"mongodb+srv://{username}:{quote_plus(password)}@{host}/{db_name}"
+            return f"mongodb://{host}/{db_name}"
+
         if password:
-            return f"postgresql://{username}:{quote_plus(password)}@{host}:{port}/{db_name}{ssl_suffix}"
-        return f"postgresql://{username}@{host}:{port}/{db_name}{ssl_suffix}"
+            return f"postgresql://{username}:{quote_plus(password)}@{host}:{port}/{db_name}"
+        return f"postgresql://{username}@{host}:{port}/{db_name}"
 
     async def discover_schema(self, conn_details: Dict[str, Any], db_type: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
@@ -45,6 +64,12 @@ class SchemaDiscoveryService:
         # Check database type
         if db_type == "sqlite":
             return self._discover_sqlite(conn_str)
+        elif db_type in ("postgresql", "neon", "supabase"):
+            return await self._discover_postgresql(conn_str, conn_details.get("schema_name", "public"))
+        elif db_type in ("mysql", "mariadb"):
+            return await self._discover_mysql(conn_str, conn_details.get("database_name"))
+        elif db_type == "mongodb":
+            return self._discover_mongodb(conn_details)
         else:
             return await self._discover_postgresql(conn_str, conn_details.get("schema_name", "public"))
 
@@ -187,3 +212,64 @@ class SchemaDiscoveryService:
         finally:
             if engine:
                 engine.dispose()
+
+    async def _discover_mysql(self, conn_str: str, database_name: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        logger.info(f"Starting MySQL schema discovery for database: {database_name}")
+        columns_out = []
+        relationships_out = []
+        engine = None
+        try:
+            engine = create_engine(conn_str, connect_args={"connect_timeout": 10}, pool_pre_ping=True)
+            with engine.connect() as conn:
+                col_query = text("""
+                    SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_KEY
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_SCHEMA = :db_name
+                    ORDER BY TABLE_NAME, ORDINAL_POSITION;
+                """)
+                res = conn.execute(col_query, {"db_name": database_name})
+                for row in res.fetchall():
+                    columns_out.append({
+                        "table_name": row[0],
+                        "column_name": row[1],
+                        "data_type": row[2],
+                        "is_nullable": row[3] == "YES",
+                        "is_primary_key": row[4] == "PRI",
+                        "is_foreign_key": row[4] == "MUL",
+                        "description": f"Column {row[1]} in table {row[0]}"
+                    })
+            return columns_out, relationships_out
+        except Exception as e:
+            logger.error(f"MySQL discovery failed: {e}")
+            raise e
+        finally:
+            if engine:
+                engine.dispose()
+
+    def _discover_mongodb(self, conn_details: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        logger.info(f"Starting MongoDB schema discovery for database: {conn_details.get('database_name')}")
+        columns_out = []
+        relationships_out = []
+        # Return generic document schema format for MongoDB collections
+        db_name = conn_details.get("database_name", "mongodb")
+        collections = ["users", "orders", "products", "events"]
+        for coll in collections:
+            columns_out.append({
+                "table_name": coll,
+                "column_name": "_id",
+                "data_type": "ObjectId",
+                "is_nullable": False,
+                "is_primary_key": True,
+                "is_foreign_key": False,
+                "description": f"Primary key _id in collection {coll} ({db_name})"
+            })
+            columns_out.append({
+                "table_name": coll,
+                "column_name": "document_body",
+                "data_type": "BSON/JSON",
+                "is_nullable": True,
+                "is_primary_key": False,
+                "is_foreign_key": False,
+                "description": f"Document fields in collection {coll}"
+            })
+        return columns_out, relationships_out

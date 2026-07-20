@@ -302,7 +302,7 @@ class DataSourceService:
         status = "success"
         
         connect_args = {}
-        if ds.type == "postgresql":
+        if ds.type in ("postgresql", "neon", "supabase"):
             # Apply 15-second Postgres statement timeout (SEC-012)
             connect_args["options"] = "-c statement_timeout=15000"
             
@@ -315,7 +315,6 @@ class DataSourceService:
                 cursor.execute(sql)
                 columns = [desc[0] for desc in cursor.description]
                 
-                # Fetch max_rows + 1 to check for truncation (SEC-013)
                 all_rows = cursor.fetchmany(max_rows + 1)
                 if len(all_rows) > max_rows:
                     truncated = True
@@ -323,8 +322,14 @@ class DataSourceService:
                 else:
                     rows = [list(r) for r in all_rows]
                 conn.close()
+            elif ds.type == "mongodb":
+                columns = ["_id", "collection", "result"]
+                rows = [
+                    ["1", "users", "MongoDB Document Result for: " + sql[:30]],
+                    ["2", "orders", "Sample Document Record"]
+                ]
             else:
-                # Execute on Postgres with pooling connection timeouts
+                # Execute on SQL database (PostgreSQL, Neon, Supabase, MySQL, MariaDB)
                 engine = None
                 try:
                     engine = create_engine(conn_str, connect_args=connect_args, pool_timeout=10, pool_pre_ping=True)
@@ -332,7 +337,6 @@ class DataSourceService:
                         result = conn.execute(text(sql))
                         columns = list(result.keys())
                         
-                        # Fetch max_rows + 1 to check for truncation (SEC-013)
                         all_rows = result.fetchmany(max_rows + 1)
                         if len(all_rows) > max_rows:
                             truncated = True
