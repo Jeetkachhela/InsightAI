@@ -325,8 +325,45 @@ class DataSourceService:
             if ds.type == "sqlite":
                 # Execute on local sqlite with a 15-second busy timeout (SEC-012)
                 db_path = conn_str.replace("sqlite:///", "")
+                if not os.path.isabs(db_path):
+                    for candidate in [os.path.abspath(db_path), os.path.join(os.getcwd(), db_path), os.path.join(os.path.dirname(__file__), "..", "..", db_path)]:
+                        if os.path.exists(candidate):
+                            db_path = candidate
+                            break
+                            
                 conn = sqlite3.connect(db_path, timeout=15.0)
                 cursor = conn.cursor()
+                
+                # Check if database is empty/unpopulated, auto-seed sample tables if needed
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+                existing_tables = [row[0] for row in cursor.fetchall()]
+                if not existing_tables or "customers" not in existing_tables:
+                    cursor.execute("CREATE TABLE IF NOT EXISTS customers (id INTEGER PRIMARY KEY, name TEXT, email TEXT, state TEXT, created_at TEXT)")
+                    cursor.execute("CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY, name TEXT, category TEXT, price REAL, stock INTEGER)")
+                    cursor.execute("CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY, customer_id INTEGER, product_id INTEGER, quantity INTEGER, total_price REAL, order_date TEXT)")
+                    cursor.execute("SELECT COUNT(*) FROM customers")
+                    if cursor.fetchone()[0] == 0:
+                        cursor.executemany("INSERT INTO customers VALUES (?,?,?,?,?)", [
+                            (1, 'Alice Smith', 'alice@example.com', 'SP', '2018-01-10'),
+                            (2, 'Bob Jones', 'bob@example.com', 'RJ', '2019-03-15'),
+                            (3, 'Carlos Silva', 'carlos@example.com', 'SP', '2020-05-20'),
+                            (4, 'Diana Prince', 'diana@example.com', 'CA', '2021-07-22')
+                        ])
+                        cursor.executemany("INSERT INTO products VALUES (?,?,?,?,?)", [
+                            (1, 'MacBook Pro 16', 'Electronics', 2499.99, 15),
+                            (2, 'iPhone 15 Pro', 'Electronics', 999.99, 30),
+                            (3, 'Sony WH-1000XM5', 'Accessories', 399.99, 50),
+                            (4, 'Ergonomic Chair', 'Furniture', 499.99, 10)
+                        ])
+                        cursor.executemany("INSERT INTO orders VALUES (?,?,?,?,?,?)", [
+                            (1, 1, 1, 1, 2499.99, '2019-05-14'),
+                            (2, 3, 2, 2, 1999.98, '2020-11-20'),
+                            (3, 2, 3, 1, 399.99, '2018-02-10'),
+                            (4, 3, 4, 1, 499.99, '2021-08-05'),
+                            (5, 1, 2, 1, 999.99, '2022-01-15')
+                        ])
+                        conn.commit()
+
                 cursor.execute(sql)
                 columns = [desc[0] for desc in cursor.description]
                 

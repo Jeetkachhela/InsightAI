@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from typing import List, Dict, Any, Tuple
 from urllib.parse import quote_plus
@@ -15,7 +16,13 @@ class SchemaDiscoveryService:
         Uses urllib.parse.quote_plus to safely encode credentials (SEC-015).
         """
         if db_type == "sqlite":
-            return f"sqlite:///{conn_details['database_name']}"
+            db_name = conn_details['database_name']
+            if not os.path.isabs(db_name):
+                for candidate in [os.path.abspath(db_name), os.path.join(os.getcwd(), db_name), os.path.join(os.path.dirname(__file__), "..", "..", db_name)]:
+                    if os.path.exists(candidate):
+                        db_name = candidate
+                        break
+            return f"sqlite:///{db_name}"
             
         # Decrypt password
         password = ""
