@@ -7,41 +7,44 @@ from app.core.security import is_safe_select_query
 from app.agents.state import AgentState
 from app.core.logging import logger
 
-def get_llm(model_name: str = None):
+async def invoke_llm_with_fallback(prompt: str, temperature: float = 0.0):
     """
-    Initializes the Groq LLM client with multi-model fallback.
-    Prevents breakage when models deprecate by chaining active models.
+    Invokes Groq LLM with execution-level fallback across verified active models.
+    If a model is decommissioned or fails during ainvoke(), automatically falls back
+    to the next active model in the chain.
     """
-    models_to_try = [
-        model_name or settings.GROQ_MODEL_NAME,
-        "deepseek-r1-distill-llama-70b",
-        "qwen-2.5-coder-32b-instruct",
-        "llama-3.3-70b-specdec",
-        "llama3-70b-8192",
-        "llama-3.1-70b-versatile",
-        "llama3-8b-8192"
+    models_chain = [
+        settings.GROQ_MODEL_NAME,
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "qwen/qwen3.6-27b",
+        "groq/compound",
+        "openai/gpt-oss-120b"
     ]
     
     unique_models = []
-    for m in models_to_try:
+    for m in models_chain:
         if m and m not in unique_models:
             unique_models.append(m)
             
+    last_error = None
     for m in unique_models:
         try:
-            return ChatGroq(
+            client = ChatGroq(
                 groq_api_key=settings.GROQ_API_KEY,
                 model_name=m,
-                temperature=0.0,
+                temperature=temperature,
                 timeout=15.0,
                 max_retries=0
             )
+            return await client.ainvoke(prompt)
         except Exception as e:
-            logger.warning(f"Groq LLM model '{m}' initialization failed: {e}. Trying fallback...")
+            logger.warning(f"Groq LLM model '{m}' execution failed: {e}. Retrying fallback model...")
+            last_error = e
             continue
-
-    logger.error("All Groq LLM models failed to initialize. AI features will run in mock/fallback mode.")
-    return None
+            
+    logger.error(f"All Groq LLM models failed execution. Last error: {last_error}")
+    raise last_error or RuntimeError("All Groq LLM models failed.")
 
 # Helper to clean JSON response from LLM
 def parse_json_response(text: str) -> Dict[str, Any]:
@@ -66,27 +69,6 @@ def parse_json_response(text: str) -> Dict[str, Any]:
 async def supervisor_node(state: AgentState) -> Dict[str, Any]:
     logger.info("Supervisor Agent: Classifying user request...")
     user_query = state.get("user_query", "")
-    
-    llm = get_llm()
-    if not llm:
-        # Mock/fallback classifier for local tests
-        classification = "sql_gen"
-        if "explain" in user_query.lower() or "select" in user_query.lower():
-            classification = "sql_explain"
-        if "optimize" in user_query.lower() or "slow" in user_query.lower():
-            classification = "sql_optimize"
-        if "fix" in user_query.lower() or "error" in user_query.lower():
-            classification = "sql_debug"
-        
-        logger.warning(f"Using mock classification: {classification}")
-        return {
-            "classification": classification,
-            "next_agent": "schema" if classification == "sql_gen" else (
-                "explain" if classification == "sql_explain" else (
-                    "optimize" if classification == "sql_optimize" else "debug"
-                )
-            )
-        }
 
     prompt = f"""You are the Supervisor Agent of InsightForge AI, a Schema-Aware SQL Intelligence Platform.
 Classify the user's intent based on their query.
@@ -106,7 +88,7 @@ Respond ONLY with a valid JSON block inside a code fence, matching this schema:
 }}
 """
     try:
-        response = await llm.ainvoke(prompt)
+        response = await invoke_llm_with_fallback(prompt)
         res_data = parse_json_response(response.content)
         classification = res_data["classification"]
     except Exception as e:
@@ -130,21 +112,17 @@ Respond ONLY with a valid JSON block inside a code fence, matching this schema:
     }
 
 # 2. Schema Agent
-# Note: The schema node is purely code-driven, querying our pgvector RAG database 
-# to pull only top-k relevant tables/columns based on semantic matching.
 async def schema_node(state: AgentState) -> Dict[str, Any]:
     logger.info("Schema Agent: Retrieving relevant schema context...")
     ds_id = state.get("data_source_id")
     user_query = state.get("user_query")
     
-    # We retrieve the RAG service dynamically to fetch context
     from app.services.rag import RAGService
     from app.core.database import AsyncSessionLocal
     
     rag_service = RAGService()
     async with AsyncSessionLocal() as db:
         try:
-            # Get semantic context (tables + columns + relationships)
             context = await rag_service.retrieve_context(db, ds_id, user_query, top_k=6)
         except Exception as e:
             logger.error(f"Schema retrieval failed: {e}")
@@ -167,22 +145,6 @@ async def planner_node(state: AgentState) -> Dict[str, Any]:
             "query_plan": {},
             "next_agent": "sql",
             "messages": [{"role": "planner", "content": "No schema context available. Proceeding with empty plan."}]
-        }
-        
-    llm = get_llm()
-    if not llm:
-        # Fallback query plan
-        plan = {
-            "tables": list(schema_context["tables"].keys())[:2],
-            "joins": [],
-            "filters": [],
-            "aggregations": [],
-            "metrics": []
-        }
-        return {
-            "query_plan": plan,
-            "next_agent": "sql",
-            "messages": [{"role": "planner", "content": "Using fallback query plan."}]
         }
         
     prompt = f"""You are the Planner Agent of InsightForge AI.
@@ -213,7 +175,7 @@ Respond ONLY with a valid JSON block matching this schema:
 }}
 """
     try:
-        response = await llm.ainvoke(prompt)
+        response = await invoke_llm_with_fallback(prompt)
         plan = parse_json_response(response.content)
     except Exception as e:
         logger.error(f"Planner LLM call failed: {e}")
@@ -243,22 +205,6 @@ async def sql_node(state: AgentState) -> Dict[str, Any]:
             "next_agent": "end",
             "messages": [{"role": "sql_agent", "content": error_msg}]
         }
-        
-    llm = get_llm()
-    if not llm:
-        # Mock SQL generation fallback
-        table = list(schema_context["tables"].keys())[0]
-        col = schema_context["tables"][table][0]["column_name"]
-        mock_sql = f"SELECT {col} FROM {table} LIMIT 10;"
-        return {
-            "generated_sql": mock_sql,
-            "sql_explanation": f"Generated query to fetch records from table `{table}` based on the retrieved schema.",
-            "confidence_score": 0.5,
-            "impact_analysis": {"tables_scanned": [table], "join_count": 0, "aggregation_complexity": "low"},
-            "validation_result": {"is_safe": True, "reason": "Query is safe."},
-            "next_agent": "end",
-            "messages": [{"role": "sql_agent", "content": f"Generated SQL: {mock_sql}"}]
-        }
 
     prompt = f"""You are the SQL Agent of InsightForge AI.
 Generate a PostgreSQL SELECT query and clear Markdown explanation to answer the user query based on the schema context.
@@ -287,7 +233,7 @@ Respond ONLY with a valid JSON block:
 }}
 """
     try:
-        response = await llm.ainvoke(prompt)
+        response = await invoke_llm_with_fallback(prompt)
         res_data = parse_json_response(response.content)
         sql = res_data.get("sql", "").strip()
         explanation = res_data.get("explanation", "Query generated successfully based on database schema.")
@@ -323,14 +269,6 @@ async def explain_node(state: AgentState) -> Dict[str, Any]:
     sql = state.get("generated_sql") or state.get("user_query")
     schema_context = state.get("schema_context", {})
     
-    llm = get_llm()
-    if not llm:
-        return {
-            "sql_explanation": "This is a query to select records from the database. (Mock Explanation)",
-            "next_agent": "end",
-            "messages": [{"role": "explain_agent", "content": "Explanation compiled."}]
-        }
-        
     prompt = f"""You are the Explain Agent of InsightForge AI.
 Explain this SQL query in plain, easy-to-understand language.
 Break down what tables are queried, the JOIN conditions, filters, group bys, and what the overall calculation represents.
@@ -345,7 +283,7 @@ Schema Context:
 Provide a clear and concise Markdown explanation.
 """
     try:
-        response = await llm.ainvoke(prompt)
+        response = await invoke_llm_with_fallback(prompt)
         explanation = response.content
     except Exception as e:
         logger.error(f"Explain Agent LLM call failed: {e}")
@@ -365,20 +303,7 @@ async def optimize_node(state: AgentState) -> Dict[str, Any]:
     # Extract SQL from query
     sql_match = re.search(r"select\s+.*", user_query, re.IGNORECASE | re.DOTALL)
     sql = sql_match.group(0) if sql_match else user_query
-    
-    llm = get_llm()
-    if not llm:
-        return {
-            "sql_optimization": {
-                "original_sql": sql,
-                "optimized_sql": sql,
-                "performance_analysis": "No indexes detected. (Mock Analysis)",
-                "recommendations": ["Create indexes on joining keys."]
-            },
-            "next_agent": "end",
-            "messages": [{"role": "optimization_agent", "content": "Optimization recommendations prepared."}]
-        }
-        
+
     prompt = f"""You are the Optimization Agent of InsightForge AI.
 Analyze this SQL query for performance improvements.
 Suggest indexing, rewrites (e.g. replacing subqueries with joins or CTEs), or structural changes.
@@ -397,7 +322,7 @@ Respond ONLY with a valid JSON block:
 }}
 """
     try:
-        response = await llm.ainvoke(prompt)
+        response = await invoke_llm_with_fallback(prompt)
         opt_data = parse_json_response(response.content)
     except Exception as e:
         logger.error(f"Optimization Agent LLM call failed: {e}")
@@ -413,19 +338,7 @@ Respond ONLY with a valid JSON block:
 async def debug_node(state: AgentState) -> Dict[str, Any]:
     logger.info("Debug Agent: Analyzing SQL error...")
     user_query = state.get("user_query", "")
-    
-    # In debug mode, the user query contains a broken SQL query and an error message.
-    # We can separate them or let the model do it.
-    
-    llm = get_llm()
-    if not llm:
-        return {
-            "generated_sql": user_query,
-            "sql_explanation": "Could not verify syntax error. (Mock Debugger)",
-            "next_agent": "end",
-            "messages": [{"role": "debug_agent", "content": "Debug fallback executed."}]
-        }
-        
+
     prompt = f"""You are the Debug Agent of InsightForge AI.
 The user has reported an issue or error with a SQL query.
 Fix the syntax or logical errors in their query and explain what went wrong.
@@ -441,7 +354,7 @@ Respond ONLY with a valid JSON block:
 }}
 """
     try:
-        response = await llm.ainvoke(prompt)
+        response = await invoke_llm_with_fallback(prompt)
         debug_data = parse_json_response(response.content)
         corrected_sql = debug_data.get("corrected_sql", "")
         explanation = debug_data.get("explanation", "")

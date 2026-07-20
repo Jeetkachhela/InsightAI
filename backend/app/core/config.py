@@ -18,7 +18,7 @@ class Settings(BaseModel):
     DEBUG: bool = False
     DATABASE_URL: str
     GROQ_API_KEY: str
-    GROQ_MODEL_NAME: str = "deepseek-r1-distill-llama-70b"
+    GROQ_MODEL_NAME: str = "llama-3.3-70b-versatile"
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
@@ -110,7 +110,7 @@ debug_flag = os.getenv("DEBUG", "true" if env != "production" else "false").lowe
 if env == "production":
     debug_flag = False
 
-groq_model = os.getenv("GROQ_MODEL_NAME", "deepseek-r1-distill-llama-70b")
+groq_model = os.getenv("GROQ_MODEL_NAME", "llama-3.3-70b-versatile")
 
 # Instantiated settings
 settings = Settings(
