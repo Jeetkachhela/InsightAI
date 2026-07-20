@@ -71,7 +71,22 @@ class DataSourceService:
             connection_protector.record_success(user_id)
         except Exception as e:
             remaining = connection_protector.record_failure(user_id)
-            raise ValueError(f"Database connection validation failed: {str(e)}. Remaining attempts: {remaining}")
+            err_str = str(e)
+            if "Connection refused" in err_str or "could not connect to server" in err_str.lower():
+                host_name = temp_conn_details.get("host") or "localhost"
+                port_num = temp_conn_details.get("port") or 5432
+                friendly_err = (
+                    f"Could not connect to database server at '{host_name}:{port_num}'. "
+                    f"If connecting to a local database, please ensure your local PostgreSQL service is running on port {port_num}. "
+                    f"If running in a cloud deployment, 'localhost' is not accessible; please use a cloud database host (e.g. Neon, Supabase, or AWS RDS)."
+                )
+            elif "password authentication failed" in err_str.lower():
+                friendly_err = "Incorrect database username or password."
+            elif "database" in err_str.lower() and "does not exist" in err_str.lower():
+                friendly_err = f"Database '{temp_conn_details.get('database_name')}' does not exist on target host."
+            else:
+                friendly_err = err_str
+            raise ValueError(f"Database connection validation failed: {friendly_err} (Remaining attempts: {remaining})")
             
         db_ds = DataSource(
             user_id=user_id,
