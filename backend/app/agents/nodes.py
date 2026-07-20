@@ -119,11 +119,31 @@ async def schema_node(state: AgentState) -> Dict[str, Any]:
     
     from app.services.rag import RAGService
     from app.core.database import AsyncSessionLocal
+    from app.repositories.repositories import SchemaMetadataRepository
     
-    rag_service = RAGService()
     async with AsyncSessionLocal() as db:
         try:
+            rag_service = RAGService()
             context = await rag_service.retrieve_context(db, ds_id, user_query, top_k=6)
+            
+            # Direct database fallback for cloud databases (Neon, Supabase, PostgreSQL, MySQL)
+            if not context or not context.get("tables"):
+                logger.info(f"RAG context empty for data source '{ds_id}'. Querying direct SchemaMetadata repository...")
+                meta_repo = SchemaMetadataRepository(db)
+                raw_metadata = await meta_repo.get_metadata(ds_id)
+                if raw_metadata:
+                    tables_dict = {}
+                    for col in raw_metadata:
+                        if col.table_name not in tables_dict:
+                            tables_dict[col.table_name] = []
+                        tables_dict[col.table_name].append({
+                            "column_name": col.column_name,
+                            "data_type": col.data_type,
+                            "is_primary_key": col.is_primary_key,
+                            "is_foreign_key": col.is_foreign_key,
+                            "description": col.description
+                        })
+                    context = {"tables": tables_dict, "relationships": []}
         except Exception as e:
             logger.error(f"Schema retrieval failed: {e}")
             context = {"tables": {}, "relationships": []}
@@ -147,20 +167,17 @@ async def planner_node(state: AgentState) -> Dict[str, Any]:
             "messages": [{"role": "planner", "content": "No schema context available. Proceeding with empty plan."}]
         }
         
+    tables_list = list(schema_context.get("tables", {}).keys())
     prompt = f"""You are the Planner Agent of InsightForge AI.
-Analyze the user request and draft a detailed SQL query plan.
-Using ONLY the provided schema context, identify:
-1. Target tables
-2. Joins (if multiple tables are needed, list joining keys)
-3. Filters (where conditions)
-4. Aggregations (group by columns)
-5. Metrics (sums, averages, counts)
+Analyze the user request and draft a detailed SQL query plan for the connected cloud database.
+Using ONLY the provided schema context, identify target tables, joins, filters, aggregations, and metrics.
 
-Schema Context: {json.dumps(schema_context)}
+Discovered Cloud Tables: {json.dumps(tables_list)}
+Full Schema Context: {json.dumps(schema_context)}
 User Query: "{user_query}"
 
 Rules:
-- NEVER assume or hallucinate tables or columns not present in the Schema Context.
+- NEVER assume or hallucinate tables or columns not present in the Discovered Cloud Tables list {json.dumps(tables_list)}.
 - Prefer explicit columns in the schema.
 
 Respond ONLY with a valid JSON block matching this schema:
@@ -206,16 +223,18 @@ async def sql_node(state: AgentState) -> Dict[str, Any]:
             "messages": [{"role": "sql_agent", "content": error_msg}]
         }
 
+    tables_list = list(schema_context.get("tables", {}).keys())
     prompt = f"""You are the SQL Agent of InsightForge AI.
-Generate a PostgreSQL SELECT query and clear Markdown explanation to answer the user query based on the schema context.
+Generate a valid SELECT query and clear Markdown explanation to answer the user query based on the schema context of the connected cloud database.
 
-Schema Context: {json.dumps(schema_context)}
+Discovered Cloud Database Tables: {json.dumps(tables_list)}
+Full Schema Context: {json.dumps(schema_context)}
 User Query: "{user_query}"
 
 Mandatory Rules:
 1. ONLY return SELECT queries. Do NOT write INSERT, UPDATE, DELETE, or DDL queries.
-2. Only reference tables and columns defined in the Schema Context. Never invent/hallucinate.
-3. If the schema is insufficient to answer the query, output: "Insufficient schema context available. Additional information or schema retrieval is required."
+2. ONLY reference tables and columns present in Discovered Cloud Database Tables: {json.dumps(tables_list)}. Do NOT invent, guess, or hallucinate non-existent tables like 'customers' unless 'customers' is explicitly in the discovered tables list!
+3. If the schema is insufficient to answer the user query, query the primary discovered table in {json.dumps(tables_list)} or return an explanation listing the available tables.
 4. Compute:
    - "confidence_score": Float (0.0 to 1.0) assessing how closely the schema columns map to the user request.
    - "impact_analysis": JSON evaluating rows scanned, join counts, and query complexity.

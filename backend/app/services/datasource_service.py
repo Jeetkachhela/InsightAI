@@ -422,8 +422,13 @@ class DataSourceService:
                 )
             elif "password authentication failed" in err_str.lower():
                 err_msg = "Authentication Failed: Incorrect database username or password."
-            elif "database" in err_str.lower() and "does not exist" in err_str.lower():
+            elif "database" in err_str.lower() and "does not exist" in err_str.lower() and "relation" not in err_str.lower() and "table" not in err_str.lower():
                 err_msg = f"Database Error: Database '{conn_dict.get('database_name')}' does not exist on target host."
+            elif "relation" in err_str.lower() or "table" in err_str.lower() or "no such table" in err_str.lower() or "undefinedtable" in err_str.lower():
+                meta = await self.repo.get_metadata(ds_id)
+                available_tables = list(set([col.table_name for col in meta])) if meta else []
+                tables_hint = f" Discovered tables in '{ds.name}': [{', '.join(available_tables)}]." if available_tables else " Click 'Re-index Schema' to discover tables in your cloud database."
+                err_msg = f"Database Execution Error: {err_str}.{tables_hint}"
             else:
                 err_msg = f"Database Execution Error: {err_str}"
 
