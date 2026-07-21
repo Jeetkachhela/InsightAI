@@ -317,9 +317,10 @@ class DataSourceService:
         status = "success"
         
         connect_args = {}
-        if ds.type in ("postgresql", "neon", "supabase"):
-            # Apply 15-second Postgres statement timeout (SEC-012)
-            connect_args["options"] = "-c statement_timeout=15000"
+        if ds.type == "postgresql":
+            # Neon poolers & Supabase poolers reject statement_timeout in startup options package
+            if "-pooler" not in conn_str.lower() and "neon.tech" not in conn_str.lower() and "supabase" not in conn_str.lower():
+                connect_args["options"] = "-c statement_timeout=15000"
             
         try:
             if ds.type == "sqlite":
