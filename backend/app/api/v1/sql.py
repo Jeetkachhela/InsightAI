@@ -41,10 +41,16 @@ async def generate_sql(
                 force_classification="sql_gen"
             )
             return result
-        except Exception:
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e)
+            )
+        except Exception as e:
+            logger.error(f"SQL generation endpoint failed: {e}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="SQL generation failed. The AI service may be temporarily unavailable. Please try again."
+                detail=f"SQL generation failed: {str(e)}"
             )
 
 @router.post(
