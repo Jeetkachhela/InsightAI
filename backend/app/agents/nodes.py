@@ -119,18 +119,20 @@ async def schema_node(state: AgentState) -> Dict[str, Any]:
     
     from app.services.rag import RAGService
     from app.core.database import AsyncSessionLocal
-    from app.repositories.repositories import SchemaMetadataRepository
+    from app.repositories.repositories import DataSourceRepository
+    from uuid import UUID
     
     async with AsyncSessionLocal() as db:
         try:
             rag_service = RAGService()
-            context = await rag_service.retrieve_context(db, ds_id, user_query, top_k=6)
+            ds_uuid = UUID(str(ds_id)) if isinstance(ds_id, str) else ds_id
+            context = await rag_service.retrieve_context(db, ds_uuid, user_query, top_k=6)
             
             # Direct database fallback for cloud databases (Neon, Supabase, PostgreSQL, MySQL)
             if not context or not context.get("tables"):
-                logger.info(f"RAG context empty for data source '{ds_id}'. Querying direct SchemaMetadata repository...")
-                meta_repo = SchemaMetadataRepository(db)
-                raw_metadata = await meta_repo.get_metadata(ds_id)
+                logger.info(f"RAG context empty for data source '{ds_id}'. Querying direct DataSourceRepository...")
+                ds_repo = DataSourceRepository(db)
+                raw_metadata = await ds_repo.get_metadata(ds_uuid)
                 if raw_metadata:
                     tables_dict = {}
                     for col in raw_metadata:
